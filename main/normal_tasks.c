@@ -590,7 +590,7 @@ void aws_iot_task(void *param) {
 
 static void initialise_wifi(void)
 {
-    tcpip_adapter_init();
+    tcpip_adapter_init(); // TODO: Remove this?
     wifi_event_group = xEventGroupCreate();
     ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -645,18 +645,8 @@ void init_modbus() {
     uart_write_bytes(uart_num, "Start RS485 UART test.\r\n", 24);
 
 }
-void app_main()
+void normal_tasks()
 {
-    // Initialize NVS.
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK( err );
-
-    //initialise_wifi();
-    tcpip_adapter_init();
     init_modbus();
     event_group = xEventGroupCreate();
     /* create dte object */

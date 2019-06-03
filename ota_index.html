@@ -1,0 +1,38 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+<head>
+  <meta charset="UTF-8">
+  <title>test upload by chunk</title>
+</head>
+<body>
+	
+	<input type="file" id="f" name="file"/>
+	<script>
+		(function() {
+
+		var f = document.getElementById('f');
+
+		if (f.files.length)
+		  processFile();
+
+		f.addEventListener('change', processFile, false);
+
+
+		function processFile(e) {
+		  var file = f.files[0];
+
+		  var formdata = new FormData();
+		  var xhr = new XMLHttpRequest();
+
+		  xhr.open('POST', '/submit', false);
+
+		  formdata.append('file', file);
+
+		  xhr.send(formdata);
+		  return(xhr);	
+		}
+
+		})();
+	</script>
+</body>
+</html>
