@@ -45,11 +45,14 @@
 
 // Defines
 #define GPIO_CONFIG_PIN GPIO_NUM_27 // TODO: Move this to sdkconfig
+#define POST_BUF_SIZE (uint16_t)512 
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 // Global variables
 static const char *TAG = "raahi_main";
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
+static char buf[POST_BUF_SIZE + 1] = { 0 };
 
 // Function declarations
 void normal_tasks(void);
@@ -150,6 +153,201 @@ static const httpd_uri_t favicon_ico = {
 };
 
 /* -----------------------------------------------------------
+| 	task_fatal_error()
+|	Exclusively used by submit post handler to indicate that
+|	OTA has failed. 
+------------------------------------------------------------*/
+static void __attribute__((noreturn)) task_fatal_error()
+{
+    ESP_LOGE(TAG, "Exiting task due to fatal error...");
+    (void)vTaskDelete(NULL);
+
+    while (1) {
+        ;
+    }
+}
+
+/* -----------------------------------------------------------
+| 	submit_post_handler()
+|	HTTP handler for firware update
+------------------------------------------------------------*/
+static esp_err_t submit_post_handler(httpd_req_t *req)
+{
+	// TODO: 	1. Change generic types like int to types with size specified like uint16_t
+    //			2. Add Error checks everywhere
+    esp_err_t err;
+	
+	char *content_type_str, *boundary_str, *temp_str;
+	char* payload = NULL;
+    int ret, remaining = req->content_len, content_type_len;
+	int total_number_of_packets, last_packet_size, packet_count = 0;
+    bool first_boundary_found = false, receive_last_packet;
+	int last_boundary_str_len, last_payload_end_pos, first_payload_end_pos, payload_size;
+    
+    esp_ota_handle_t update_handle = 0 ;
+	const esp_partition_t *update_partition = NULL;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    int binary_file_length = 0;
+    update_partition = esp_ota_get_next_update_partition(NULL);
+    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
+             update_partition->subtype, update_partition->address);
+    assert(update_partition != NULL);
+
+	// TODO: Check if new fw size is greater than 1M
+	last_packet_size = remaining % POST_BUF_SIZE; // Calculate the payload size of the last packet
+	if (last_packet_size != 0) { // Ceil operation. Substitute with library function if avaialble
+		total_number_of_packets = (req->content_len / POST_BUF_SIZE) + 1;
+	} else {
+		total_number_of_packets = req->content_len / POST_BUF_SIZE;
+	}
+	
+		
+	printf("\n-------------- Receiving new firmware -------------\n");
+	printf("Content Length = %d\n", remaining);
+
+	// Read the header to find out the boundary string
+	content_type_len = httpd_req_get_hdr_value_len(req, "Content-Type") + 1;
+	printf("Content Type Length: %d\n", content_type_len);
+	
+	content_type_str = malloc(content_type_len);
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type_str, content_type_len) == ESP_OK) {
+        //ESP_LOGI(TAG, "Found header => Content-Type: %s", content_type_str);
+		printf("Content-Type:%s\n", content_type_str);
+    }
+    boundary_str = strstr(content_type_str, "boundary=") + strlen("boundary=");
+	printf("Boundary=%s\n", boundary_str);
+	
+	last_boundary_str_len = strlen(boundary_str) + 4;
+	if (last_boundary_str_len < last_packet_size) {
+		receive_last_packet = true;
+		last_payload_end_pos = last_packet_size - last_boundary_str_len;
+	} else {
+		receive_last_packet = false;
+		last_payload_end_pos = POST_BUF_SIZE - (last_boundary_str_len - last_packet_size);
+	}	
+    
+	printf("receive_last_packet: %d\n", receive_last_packet);
+	printf("last_payload_end_pos: %d\n", last_payload_end_pos);
+
+    while (remaining > 0) {
+        // Read the data for the request 
+        if ((ret = httpd_req_recv(req, buf,
+                        MIN(remaining, POST_BUF_SIZE))) <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                // Retry receiving if timeout occurred 
+                continue;
+            }
+            return ESP_FAIL;
+        }
+
+        packet_count++;
+		remaining -= ret;
+
+		//printf("Packet Count: %d\t ret val: %d\n", packet_count, ret);
+
+		// Examine buffer for data starting point
+		if (first_boundary_found == false) {
+			if(strstr(buf, boundary_str) != NULL) {
+				printf("First boundary found\n");
+				temp_str = strstr(buf, boundary_str) + strlen(boundary_str); 
+				first_boundary_found = true;
+				payload = strstr(temp_str, "Content-Type: text/plain") + strlen("Content-Type: application/octet-stream") + 4; //+4 for \r\n\r\n
+				first_payload_end_pos = POST_BUF_SIZE - (int)(payload - buf);   
+				payload_size = first_payload_end_pos;
+				payload[payload_size] = '\0';
+				
+				//printf("%s", payload);
+				
+				// First payload is ready to be processed. First check the new firmware version
+                if ( payload_size > sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
+                    // check current version with downloading
+                	esp_app_desc_t new_app_info;
+                    memcpy(&new_app_info, &payload[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t)], sizeof(esp_app_desc_t));
+                    ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
+
+                    esp_app_desc_t running_app_info;
+                    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
+                        ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
+                    }
+                    
+					// Begin the OTA process
+					err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+                    if (err != ESP_OK) {
+                        ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
+                        task_fatal_error();
+                    }
+                    ESP_LOGI(TAG, "esp_ota_begin succeeded");
+				} else { // payload size is too small
+					ESP_LOGE(TAG, "OTA begin function couldn't be carried out as OTA buffer is too small");
+					task_fatal_error();
+				}
+			}
+		} else {
+			payload = buf;
+	    
+		    // Code related to eliminating bytes pertaining to the last boundary
+		    if (packet_count == (total_number_of_packets - 1)) {// If this is the penultimate packet	
+		    	if (receive_last_packet == false) { // Then we should stop receiving more packets
+		    		payload_size = last_payload_end_pos; 
+		    	} else {
+					payload_size = ret;
+		    	}
+		    } else if (packet_count == total_number_of_packets) {
+		    	payload_size = last_payload_end_pos; 
+		    } else {
+				payload_size = ret;
+		    }
+
+			payload[payload_size] = '\0';
+		    // Print the buffer contents only if first boundary has been found
+		    //printf("%s", payload);
+
+			// Write payload to the ota partition
+            err = esp_ota_write( update_handle, (const void *)payload, payload_size);
+            if (err != ESP_OK) {
+                task_fatal_error();
+            }
+            binary_file_length += payload_size;
+            ESP_LOGD(TAG, "Written image length %d", binary_file_length);
+
+		    
+		    if ((packet_count == (total_number_of_packets - 1)) && receive_last_packet == false) {
+		    	break;
+		    }
+		}
+    }// End of While loop
+    
+	ESP_LOGI(TAG, "Total Write binary data length : %d", binary_file_length);
+
+    if (esp_ota_end(update_handle) != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed!");
+        task_fatal_error();
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
+        task_fatal_error();
+    }
+    ESP_LOGI(TAG, "Prepare to restart system!");
+    esp_restart();
+
+	httpd_resp_send(req, NULL, 0);
+    free(content_type_str);
+	
+	return(ESP_OK);
+}
+
+static const httpd_uri_t submit = {
+    .uri       = "/submit",
+    .method    = HTTP_POST,
+    .handler   = submit_post_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = "Thank You"
+};
+
+/* -----------------------------------------------------------
 | 	start_ota_webserver()
 |	Starts HTTP server for OTA updates 
 ------------------------------------------------------------*/
@@ -185,7 +383,7 @@ static void ota_task()
 	
 	// Get the homepage up: Initialize webserver, register all handlers
     ota_http_server = start_ota_webserver();
-	 	
+    	 	
 }
 
 /* -----------------------------------------------------------
@@ -288,7 +486,15 @@ void app_main()
     
 	// Init WiFi soft AP
 	wifi_init_softap();
+
+    // Display the current firmware's version
+	const esp_partition_t *running = esp_ota_get_running_partition();
     
+    esp_app_desc_t running_app_info;
+    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
+        ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
+    }
+
 	// Check the Config GPIO pin. 
     if(gpio_get_level(GPIO_CONFIG_PIN == 1)) {
 		ESP_LOGI(TAG, "Config Pin set. Going into OTA mode\n");
