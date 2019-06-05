@@ -176,13 +176,15 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	// TODO: 	1. Change generic types like int to types with size specified like uint16_t
     //			2. Add Error checks everywhere
     esp_err_t err;
+	printf("In post handler\n");
+
+	int tmpIndex;
 	
 	char *content_type_str, *boundary_str, *temp_str;
 	char* payload = NULL;
     int ret, remaining = req->content_len, content_type_len;
-	int total_number_of_packets, last_packet_size, packet_count = 0;
-    bool first_boundary_found = false, receive_last_packet;
-	int last_boundary_str_len, last_payload_end_pos, first_payload_end_pos, payload_size;
+    bool first_boundary_found = false;
+	int last_boundary_str_len, first_payload_end_pos, payload_size = 0;
     
     esp_ota_handle_t update_handle = 0 ;
 	const esp_partition_t *update_partition = NULL;
@@ -194,13 +196,6 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
     assert(update_partition != NULL);
 
 	// TODO: Check if new fw size is greater than 1M
-	last_packet_size = remaining % POST_BUF_SIZE; // Calculate the payload size of the last packet
-	if (last_packet_size != 0) { // Ceil operation. Substitute with library function if avaialble
-		total_number_of_packets = (req->content_len / POST_BUF_SIZE) + 1;
-	} else {
-		total_number_of_packets = req->content_len / POST_BUF_SIZE;
-	}
-	
 		
 	printf("\n-------------- Receiving new firmware -------------\n");
 	printf("Content Length = %d\n", remaining);
@@ -218,16 +213,6 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	printf("Boundary=%s\n", boundary_str);
 	
 	last_boundary_str_len = strlen(boundary_str) + 4;
-	if (last_boundary_str_len < last_packet_size) {
-		receive_last_packet = true;
-		last_payload_end_pos = last_packet_size - last_boundary_str_len;
-	} else {
-		receive_last_packet = false;
-		last_payload_end_pos = POST_BUF_SIZE - (last_boundary_str_len - last_packet_size);
-	}	
-    
-	printf("receive_last_packet: %d\n", receive_last_packet);
-	printf("last_payload_end_pos: %d\n", last_payload_end_pos);
 
     while (remaining > 0) {
         // Read the data for the request 
@@ -237,10 +222,11 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
                 // Retry receiving if timeout occurred 
                 continue;
             }
-            return ESP_FAIL;
+    		
+			free(content_type_str);
+            return(ESP_FAIL);
         }
 
-        packet_count++;
 		remaining -= ret;
 
 		//printf("Packet Count: %d\t ret val: %d\n", packet_count, ret);
@@ -251,13 +237,23 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 				printf("First boundary found\n");
 				temp_str = strstr(buf, boundary_str) + strlen(boundary_str); 
 				first_boundary_found = true;
-				payload = strstr(temp_str, "Content-Type: text/plain") + strlen("Content-Type: application/octet-stream") + 4; //+4 for \r\n\r\n
-				first_payload_end_pos = POST_BUF_SIZE - (int)(payload - buf);   
+				payload = strstr(temp_str, "Content-Type: application/octet-stream") + strlen("Content-Type: application/octet-stream") + 4; //+4 for \r\n\r\n
+				if (payload == NULL) {
+					ESP_LOGE(TAG, "Content-Type not found or it isn't application/octet-stream");
+    				free(content_type_str);
+					return(ESP_FAIL);
+				}
+				first_payload_end_pos = ret - (int)(payload - buf);   
+				printf("First payload_end_pos = %d\n", first_payload_end_pos);
 				payload_size = first_payload_end_pos;
 				payload[payload_size] = '\0';
 				
-				//printf("%s", payload);
-				
+				for(tmpIndex = 0; tmpIndex < (first_payload_end_pos/4); tmpIndex++)
+				{
+					printf("0x%.2hhX ", payload[tmpIndex]);
+				}
+				printf("\n");
+
 				// First payload is ready to be processed. First check the new firmware version
                 if ( payload_size > sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
                     // check current version with downloading
@@ -274,47 +270,54 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 					err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
                     if (err != ESP_OK) {
                         ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
-                        task_fatal_error();
+    					free(content_type_str);
+						return(ESP_FAIL);
                     }
                     ESP_LOGI(TAG, "esp_ota_begin succeeded");
 				} else { // payload size is too small
 					ESP_LOGE(TAG, "OTA begin function couldn't be carried out as OTA buffer is too small");
-					task_fatal_error();
+    				free(content_type_str);
+					return(ESP_FAIL);
 				}
 			}
 		} else {
 			payload = buf;
 	    
 		    // Code related to eliminating bytes pertaining to the last boundary
-		    if (packet_count == (total_number_of_packets - 1)) {// If this is the penultimate packet	
-		    	if (receive_last_packet == false) { // Then we should stop receiving more packets
-		    		payload_size = last_payload_end_pos; 
-		    	} else {
-					payload_size = ret;
-		    	}
-		    } else if (packet_count == total_number_of_packets) {
-		    	payload_size = last_payload_end_pos; 
-		    } else {
+			if (remaining > last_boundary_str_len) { // Still more bytes to be received before OTA can end
 				payload_size = ret;
-		    }
+			} else if (remaining == last_boundary_str_len){ // Only the last boundary remains to be read. But we don't need to. So end OTA
+				payload_size = ret;
+				break;
+			} else { // Implies that in the current payload, some bytes pertaining to the last boundary string needs to be eliminated
+				payload_size = ret - (last_boundary_str_len - remaining);
+				// Debug prints
+				for(tmpIndex = 0; tmpIndex < payload_size; tmpIndex++)
+				{
+					printf("0x%.2hhX ", payload[tmpIndex]);
+				}
+				printf("\n");
+			}
+
 
 			payload[payload_size] = '\0';
 		    // Print the buffer contents only if first boundary has been found
 		    //printf("%s", payload);
-
-			// Write payload to the ota partition
-            err = esp_ota_write( update_handle, (const void *)payload, payload_size);
-            if (err != ESP_OK) {
-                task_fatal_error();
-            }
-            binary_file_length += payload_size;
-            ESP_LOGD(TAG, "Written image length %d", binary_file_length);
-
 		    
-		    if ((packet_count == (total_number_of_packets - 1)) && receive_last_packet == false) {
-		    	break;
-		    }
+		} // else of if(first_boundary_found..
+		
+		// Write payload to the ota partition
+		if (payload_size == 0 || payload == NULL) {// This is an additional just-in-case check
+			ESP_LOGE(TAG, "Payload size is zero or payload pointing to NULL");
+			task_fatal_error();
 		}
+        err = esp_ota_write( update_handle, (const void *)payload, payload_size);
+        if (err != ESP_OK) {
+            task_fatal_error();
+        }
+        binary_file_length += payload_size;
+        ESP_LOGD(TAG, "Written image length %d", binary_file_length);
+
     }// End of While loop
     
 	ESP_LOGI(TAG, "Total Write binary data length : %d", binary_file_length);
@@ -362,7 +365,9 @@ static httpd_handle_t start_ota_webserver(void)
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &ota_homepage);
-		httpd_register_uri_handler(server, &favicon_ico);	
+		httpd_register_uri_handler(server, &favicon_ico);
+		httpd_register_uri_handler(server, &submit);
+			
         return server;
     }
 
