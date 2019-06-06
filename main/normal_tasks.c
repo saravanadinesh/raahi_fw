@@ -720,6 +720,10 @@ void update_sysconfig(char* form_str)
 	char* tmpStr;
 	uint8_t first_slave_id, second_slave_id;
 	
+	static const char* config_file_name = "/spiffs/sysconfig.txt";
+	FILE* config_file = NULL;
+	
+	
 	// Parse the received string to obtain sysconfig information
 	tmpStr = strstr(form_str, "first_slave_id=") + strlen("first_slave_id=");
 	first_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
@@ -730,7 +734,25 @@ void update_sysconfig(char* form_str)
 	// Debug prints
 	printf("First slave id: %d\n", first_slave_id);
 	printf("Second slave id: %d\n", second_slave_id);
+
+	sysconfig.first_slave_id = first_slave_id;
+	sysconfig.second_slave_id = second_slave_id;
+
+	config_file = fopen(config_file_name, "rb");
+	if (config_file == NULL) { // If config file isnt' present, create one with default values
+		ESP_LOGE(TAG, "Config file not present. Can't update sysconfig!");
+		abort();
+	}
 	
+	fclose(config_file);
+	config_file = fopen(config_file_name, "wb");
+
+	if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+		ESP_LOGE(TAG, "Couldn't update sysconfig file although it is present");
+		abort();
+	} else {
+		ESP_LOGI(TAG, "Successfully updated sysconfig file");
+	}
 }
 
 /* -----------------------------------------------------------
@@ -842,7 +864,7 @@ void read_sysconfig()
 		}
 
 	} else { // sysconfig.txt file is present. So populate global variable with data from it
-		if(fread(&sysconfig, sizeof(struct config_struct), 1, config_file) != sizeof(struct config_struct)) {
+		if(fread(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
 			ESP_LOGE(TAG, "Couldn't read sysconfig.txt contents");
 			abort();
 		} else {
@@ -855,6 +877,8 @@ void read_sysconfig()
 void normal_tasks()
 {
     static httpd_handle_t http_server = NULL;
+
+	read_sysconfig();
 	
 	// Get the homepage up: Initialize webserver, register all handlers
     http_server = start_webserver();
