@@ -400,7 +400,7 @@ void init_config_gpio()
     gpio_config_t config_io;
     //disable interrupt
     config_io.intr_type = GPIO_PIN_INTR_DISABLE;
-    //set as output mode
+    //set as input mode
     config_io.mode = GPIO_MODE_INPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
     config_io.pin_bit_mask = (1ULL<<GPIO_CONFIG_PIN);
@@ -501,7 +501,7 @@ void app_main()
     }
 
 	// Check the Config GPIO pin. 
-    if(gpio_get_level(GPIO_CONFIG_PIN == 1)) {
+    if(gpio_get_level(GPIO_CONFIG_PIN) == 1) {
 		ESP_LOGI(TAG, "Config Pin set. Going into OTA mode\n");
 		ota_task();
 	} else {

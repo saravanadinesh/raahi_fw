@@ -119,6 +119,23 @@ menu "Example Configuration"
             help
                 Buffer size of UART RX buffer.
     endmenu
+
+	menu "Modbus Default Configuration"
+		config FIRST_SLAVE_ID
+			int "Modbus first slave ID"
+			range 0 255
+			default 10
+			help
+				Slave ID of first Modbus slave.
+
+		config SECOND_SLAVE_ID
+			int "Modbus second slave ID"
+			range 0 255
+			default 11
+			help
+				Slave ID of second Modbus slave.
+	endmenu	
+
     config WIFI_SSID
         string "WiFi SSID"
         default "myssid"
