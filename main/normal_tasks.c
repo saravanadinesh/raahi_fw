@@ -71,7 +71,7 @@ static const int CONNECT_BIT = BIT0;
 static const int CONNECTED_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
-static const char *TAG = "subpub";
+static const char *TAG = "normal_task";
 static EventGroupHandle_t event_group = NULL;
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
@@ -226,83 +226,56 @@ uint16_t usMBCRC16( uint8_t* pucFrame, uint16_t usLen )
 }
 
 // An example of echo test with hardware flow control on UART
-uint16_t echo_task()
+static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* result)
 {
-	    // Compose modbus command for sapcon slave
-        uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE);
-        uint8_t* data_in = (uint8_t*) malloc(BUF_SIZE);
-        data_out[0] = 0x01;
-        data_out[1] = 0x03;
-        data_out[2] = 0x00;
-        data_out[3] = 0xd5;
-        data_out[4] = 0x00;
-        data_out[5] = 0x02;
-        data_out[6] = 0xd5;
-        data_out[7] = 0xf3;
-        modbus_crc = usMBCRC16(data_out, 6);
-		printf("modbus_crc = 0x%.04X", modbus_crc);
-		printf("\n");
+    uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE);
+    uint8_t* data_in = (uint8_t*) malloc(BUF_SIZE);
 
-		// Write modbus master command on rs485
-                uart_write_bytes(uart_num, (const char*)&data_out[0], 8);
-		for (int count = 0; count <5; count++)
-		{
-			//Read data from UART
-        	int len = uart_read_bytes(uart_num, data_in, BUF_SIZE, PACKET_READ_TICS);
-        
-        	//Write data back to UART
-        	if ((len > 0) && (data_in[0] == data_out[0])) {
-            	ESP_LOGI(TAG, "Received %u bytes:", len);
-            	printf("[ ");
-            	for (int i = 0; i < len; i++) {
-                	printf("0x%.2X ", (uint8_t)data_in[i]);
-            	}
-           		printf("] \n");
-				break;
-        	} else {
-				printf("Waiting for slave to respond \n");
-			}
-
-			vTaskDelay(1000 / portTICK_PERIOD_MS);
-		} // end of for count..
-               return (data_in[3] <<8| data_in[4]); 
-/*
-	        // Compose modbus command for sapcon slave
-               data_out[0] = 0x05;
-               data_out[1] = 0x03;
-               data_out[2] = 0x00;
-               data_out[3] = 0xff;
-               data_out[4] = 0x00;
-               data_out[5] = 0x02;
-               data_out[6] = 0xbf;
-               data_out[7] = 0xf5;
+	// Error Checks
+	if (slave_id == 0) { // Zero is not allowed
+		return(ESP_FAIL);
+	}
 	
-		// Write modbus master command on rs485
-                uart_write_bytes(uart_num, (const char*)&data_out[0], 8);
+	// Compose modbus command 
+    data_out[0] = slave_id;
+    data_out[1] = 0x03;
+    data_out[2] = (uint8_t) (register_address >> 8);
+    data_out[3] = (uint8_t) (register_address & 0xFF);
+    data_out[4] = 0x00;
+    data_out[5] = 0x01;
 
-		for (int count = 0; count <5; count++)
-		{
-			//Read data from UART
-        	int len = uart_read_bytes(uart_num, data_in, BUF_SIZE, PACKET_READ_TICS);
-        
-        	//Write data back to UART
-        	if ((len > 0) && (data_in[0] == data_out[0])) {
-            	ESP_LOGI(TAG, "Received %u bytes:", len);
-            	printf("[ ");
-            	for (int i = 0; i < len; i++) {
-                	printf("0x%.2X ", (uint8_t)data_in[i]);
-            	}
-           		printf("] \n");
-				break;
-        	} else {
-				printf("Waiting for slave to respond \n");
-			}
-
-			vTaskDelay(1000 / portTICK_PERIOD_MS);
+	// Calculate CRC for the command
+    modbus_crc = usMBCRC16(data_out, 6);
+    data_out[6] = (uint8_t) (modbus_crc >> 8);   
+    data_out[7] = (uint8_t) (modbus_crc & 0xFF); 
+	
+	// Write modbus master command on rs485
+    uart_write_bytes(uart_num, (const char*)&data_out[0], 8);
+	for (int count = 0; count <5; count++)
+	{
+		//Read data from UART
+    	int len = uart_read_bytes(uart_num, data_in, BUF_SIZE, PACKET_READ_TICS);
+    
+    	//Write data back to UART
+    	if ((len > 0) && (data_in[0] == data_out[0])) {
+        	ESP_LOGI(TAG, "Received %u bytes:", len);
+        	printf("[ ");
+        	for (int i = 0; i < len; i++) {
+            	printf("0x%.2X ", (uint8_t)data_in[i]);
+        	}
+       		printf("] \n");
+			break;
+    	} else {
+			printf("Waiting for slave to respond \n");
 		}
-*/
 
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	} // end of for count..
+   	
+	*result = ((uint16_t)data_in[3] << 8) | (uint16_t)data_in[4] 
+	return (ESP_OK); 
 }
+
 static esp_err_t example_default_handle(modem_dce_t *dce, const char *line)
 {
     esp_err_t err = ESP_FAIL;
@@ -580,19 +553,38 @@ void aws_iot_task(void *param) {
         //sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS0)", i++);
         //paramsQOS0.payloadLen = strlen(cPayload);
         //rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS0);
-        sprintf(cPayload, "%s : 0x%04X ", "register read from Modbus ESP32)", echo_task());
-        paramsQOS1.payloadLen = strlen(cPayload);
-        rc = aws_iot_mqtt_publish(&client, topic, TOPIC_LEN, &paramsQOS1);
-        if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            ESP_LOGW(TAG, "QOS1 publish ack not received.");
-            rc = SUCCESS;
-        }
+		send_sensor_data(sysconfig.first_slave_id, sysconfig.first_reg);
+		send_sensor_data(sysconfig.first_slave_id, sysconfig.second_reg);
+		send_sensor_data(sysconfig.first_slave_id, sysconfig.third_reg);
+
+		send_sensor_data(sysconfig.first_slave_id, sysconfig.first_reg);
+		send_sensor_data(sysconfig.second_slave_id, sysconfig.second_reg);
+		send_sensor_data(sysconfig.third_slave_id, sysconfig.third_reg);
     }
 
     ESP_LOGE(TAG, "An error occurred in the main loop.");
     abort();
 }
 
+void send_sensor_data(uint8_t slave_id, uint16_t reg_address)
+{
+	uint16_t modbus_read_result;
+	
+	if(modbus_read(slave_id, reg_address, &modbus_read_result) == ESP_OK) {	
+		sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
+				"Slave ID", slave_id, \
+				"Reg Add", reg_address, \
+				"Reg Val", modbus_read_result);
+    	paramsQOS1.payloadLen = strlen(cPayload);
+    	rc = aws_iot_mqtt_publish(&client, topic, TOPIC_LEN, &paramsQOS1);
+    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
+    	    rc = SUCCESS;
+    	}
+	} else {
+		ESP_LOGI(TAG, "Error reading modbus data");
+	} 
+}
 
 void init_modbus() {
     uart_config_t uart_config = {
@@ -753,6 +745,7 @@ void update_sysconfig(char* form_str)
 	} else {
 		ESP_LOGI(TAG, "Successfully updated sysconfig file");
 	}
+	fclose(config_file);
 }
 
 /* -----------------------------------------------------------
@@ -842,7 +835,8 @@ void read_sysconfig()
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
 	struct config_struct default_config;
-	
+	size_t content_size;
+
 	// Populate the default config
 	default_config.first_slave_id = CONFIG_FIRST_SLAVE_ID; // From sdkconfig	
 	default_config.second_slave_id = CONFIG_SECOND_SLAVE_ID;
@@ -864,11 +858,14 @@ void read_sysconfig()
 		}
 
 	} else { // sysconfig.txt file is present. So populate global variable with data from it
-		if(fread(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+		if((content_size = fread(&sysconfig, sizeof(struct config_struct), 1, config_file)) != 1) {
 			ESP_LOGE(TAG, "Couldn't read sysconfig.txt contents");
 			abort();
 		} else {
 			ESP_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
+			// Display what was read
+			ESP_LOGI(TAG, "First Slave's ID: %d\n", sysconfig.first_slave_id);
+			ESP_LOGI(TAG, "Second Slave's ID: %d\n", sysconfig.second_slave_id);
 		}
 	}
 }

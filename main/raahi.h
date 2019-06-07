@@ -10,7 +10,13 @@
 struct config_struct {
 	uint8_t first_slave_id;
 	uint8_t second_slave_id;
-	char* apn;
+	uint16_t first_reg;
+	uint16_t second_reg;
+	uint16_t third_reg;
+	uint16_t samples_per_min;
+	
+	char topic[30];
+	char apn[20];
 };
 
 #endif //#ifndef _RAAHI_FW_H_

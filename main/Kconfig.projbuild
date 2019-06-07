@@ -18,7 +18,7 @@ menu "Example Configuration"
 
     config ESP_MODEM_APN
         string "Set Access Point Name (APN)"
-        default "CMNET"
+        default "ioturl.com"
         help
             Logical name which is used to select the GGSN or the external packet data network.
 
@@ -134,6 +134,27 @@ menu "Example Configuration"
 			default 11
 			help
 				Slave ID of second Modbus slave.
+
+		config FIRST_REG
+			int "First register to read"
+			range 0 65535
+			default 214
+			help
+				First register to read
+
+		config SECOND_REG
+			int "Second register to read"
+			range 0 65535
+			default 215
+			help
+				Second register to read
+
+		config THIRD_REG
+			int "Third register to read"
+			range 0 65535
+			default 216
+			help
+				Third register to read
 	endmenu	
 
     config WIFI_SSID
