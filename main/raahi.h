@@ -8,12 +8,9 @@
 
 // Data type definitions
 struct config_struct {
-	uint8_t first_slave_id;
-	uint8_t second_slave_id;
-	uint16_t first_reg;
-	uint16_t second_reg;
-	uint16_t third_reg;
-	uint16_t samples_per_min;
+	uint8_t slave_id[CONFIG_MAX_MODBUS_SLAVES];
+	uint16_t reg_address[CONFIG_MAX_MODBUS_REGISTERS];
+	uint16_t sampling_period_in_sec;
 	
 	char topic[30];
 	char apn[20];

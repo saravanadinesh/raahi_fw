@@ -155,6 +155,27 @@ menu "Example Configuration"
 			default 216
 			help
 				Third register to read
+		
+		config MAX_MODBUS_SLAVES
+			int "Max number of slaves"
+			range 1 10
+			default 2
+			help
+				Max number of slaves a device can have
+		
+		config MAX_MODBUS_REGISTERS
+			int "Max registers per slave"
+			range 1 10
+			default 3
+			help 
+				Max number of registers (per slave) that can be sent over MQTT to AWS
+
+		config SAMPLING_PERIOD
+			int "Sampling period in seconds"
+			range 0 600
+			default 15
+			help	
+				The time between two sample sets of sensor data 
 	endmenu	
 
     config WIFI_SSID
@@ -170,6 +191,12 @@ menu "Example Configuration"
             WiFi password (WPA or WPA2) for the example to use.
 
             Can be left blank if the network has no security set.
+
+	config MQTT_TOPIC_ROOT
+		string "MQTT Topic Root"
+		default "Sapcon"
+		help
+			A string without slashes that will be used as head topic
 
     config AWS_EXAMPLE_CLIENT_ID
         string "AWS IoT Client ID"

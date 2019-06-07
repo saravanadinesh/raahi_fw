@@ -37,7 +37,7 @@
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-#include "driver/sdmmc_host.h"
+//#include "driver/sdmmc_host.h" // TODO: This is probably not needed. Remove to save space
 #include "tcpip_adapter.h"
 
 #include "nvs.h"
@@ -59,12 +59,15 @@
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
-#define FORM_DATA_BUF_SIZE 256
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
 #define MODEM_SMS_MAX_LENGTH (128)
 #define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
 #define MODEM_PROMPT_TIMEOUT_MS (10)
+#define MAX_TOPIC_LEN 30 
+
+// Function declarations
+httpd_handle_t start_webserver(void);
 
 
 static const int CONNECT_BIT = BIT0;
@@ -239,8 +242,8 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 	// Compose modbus command 
     data_out[0] = slave_id;
     data_out[1] = 0x03;
-    data_out[2] = (uint8_t) (register_address >> 8);
-    data_out[3] = (uint8_t) (register_address & 0xFF);
+    data_out[2] = (uint8_t) (reg_address >> 8);
+    data_out[3] = (uint8_t) (reg_address & 0xFF);
     data_out[4] = 0x00;
     data_out[5] = 0x01;
 
@@ -272,7 +275,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	} // end of for count..
    	
-	*result = ((uint16_t)data_in[3] << 8) | (uint16_t)data_in[4] 
+	*result = ((uint16_t)data_in[3] << 8) | (uint16_t)data_in[4]; 
 	return (ESP_OK); 
 }
 
@@ -428,21 +431,50 @@ void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {
     }
 }
 
-void aws_iot_task(void *param) {
+IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic, uint8_t slave_id, uint16_t reg_address)
+{
+	uint16_t modbus_read_result;
+    IoT_Publish_Message_Params paramsQOS;
     char cPayload[100];
+   	char full_topic[MAX_TOPIC_LEN + 1];	
+    IoT_Error_t rc = FAILURE;
+	
+	if ((strlen(sysconfig.topic) + strlen(topic)) > MAX_TOPIC_LEN) {
+		ESP_LOGE(TAG, "MQTT topic is too long");
+	}
+	full_topic = strcat(sysconfig.topic, topic);
+	printf("MQTT topic: %s\n", full_topic); 
+  	
+	paramsQOS.qos = QOS0;
+    paramsQOS.payload = (void *) cPayload;
+    paramsQOS.isRetained = 0;
+	
+	if(modbus_read(slave_id, reg_address, &modbus_read_result) == ESP_OK) {	
+		sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
+				"Slave ID", slave_id, \
+				"Reg Add", reg_address, \
+				"Reg Val", modbus_read_result);
+    	paramsQOS.payloadLen = strlen(cPayload);
+    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
+    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
+    	    rc = SUCCESS;
+    	}
+	} else {
+		ESP_LOGI(TAG, "Error reading modbus data");
+	} 
+}
+
+void aws_iot_task(void *param) {
 
     int32_t i = 0;
     char *topic = (char *)param; 
-    int TOPIC_LEN = strlen(topic);
 
     IoT_Error_t rc = FAILURE;
 
     AWS_IoT_Client client;
     IoT_Client_Init_Params mqttInitParams = iotClientInitParamsDefault;
     IoT_Client_Connect_Params connectParams = iotClientConnectParamsDefault;
-
-    IoT_Publish_Message_Params paramsQOS0;
-    IoT_Publish_Message_Params paramsQOS1;
 
     ESP_LOGI(TAG, "AWS TOPIC is IMEI:%s of length %d", topic, TOPIC_LEN);
     ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
@@ -531,14 +563,6 @@ void aws_iot_task(void *param) {
 
     sprintf(cPayload, "%s : %d ", "hello from SDK", i);
 
-    paramsQOS0.qos = QOS0;
-    paramsQOS0.payload = (void *) cPayload;
-    paramsQOS0.isRetained = 0;
-
-    paramsQOS1.qos = QOS1;
-    paramsQOS1.payload = (void *) cPayload;
-    paramsQOS1.isRetained = 0;
-
     while((NETWORK_ATTEMPTING_RECONNECT == rc || NETWORK_RECONNECTED == rc || SUCCESS == rc)) {
 
         //Max time the yield function will wait for read messages
@@ -553,38 +577,31 @@ void aws_iot_task(void *param) {
         //sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS0)", i++);
         //paramsQOS0.payloadLen = strlen(cPayload);
         //rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS0);
-		send_sensor_data(sysconfig.first_slave_id, sysconfig.first_reg);
-		send_sensor_data(sysconfig.first_slave_id, sysconfig.second_reg);
-		send_sensor_data(sysconfig.first_slave_id, sysconfig.third_reg);
-
-		send_sensor_data(sysconfig.first_slave_id, sysconfig.first_reg);
-		send_sensor_data(sysconfig.second_slave_id, sysconfig.second_reg);
-		send_sensor_data(sysconfig.third_slave_id, sysconfig.third_reg);
+	
+		uint8_t slave_id, slave_id_idx;
+		uint16_t reg_address, reg_address_idx;
+	
+		for (slave_id_idx = 0; slave_id_idx < CONFIG_MAX_MODBUS_SLAVES; slave_id_idx++)
+		{	
+			if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
+				break;
+			}
+			
+			for (reg_address_idx = 0; reg_address_idx < CONFIG_MODBUS_REGISTERS; reg_address_idx++)
+			{
+				if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
+					break;
+				}
+	
+				send_sensor_data(&client, topic, sysconfig.first_slave_id, sysconfig.first_reg);
+			}
+		}
     }
 
     ESP_LOGE(TAG, "An error occurred in the main loop.");
     abort();
 }
 
-void send_sensor_data(uint8_t slave_id, uint16_t reg_address)
-{
-	uint16_t modbus_read_result;
-	
-	if(modbus_read(slave_id, reg_address, &modbus_read_result) == ESP_OK) {	
-		sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
-				"Slave ID", slave_id, \
-				"Reg Add", reg_address, \
-				"Reg Val", modbus_read_result);
-    	paramsQOS1.payloadLen = strlen(cPayload);
-    	rc = aws_iot_mqtt_publish(&client, topic, TOPIC_LEN, &paramsQOS1);
-    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
-    	    rc = SUCCESS;
-    	}
-	} else {
-		ESP_LOGI(TAG, "Error reading modbus data");
-	} 
-}
 
 void init_modbus() {
     uart_config_t uart_config = {
@@ -625,204 +642,6 @@ void init_modbus() {
 
 }
 
-/* -----------------------------------------------------------
-| 	homepage_get_handler()
-|	HTTP server side handler for GET reuests on /
-------------------------------------------------------------*/
-static esp_err_t homepage_get_handler(httpd_req_t *req)
-{
-     /* Get handle to embedded file upload script */
-    extern const unsigned char homepage_start[] asm("_binary_index_html_start");
-    extern const unsigned char homepage_end[]   asm("_binary_index_html_end");
-    const size_t homepage_size = (homepage_end - homepage_start);
-	
-	//httpd_resp_set_type(req, "text/html"); 
-    httpd_resp_send_chunk(req, (const char *)homepage_start, homepage_size);
-    httpd_resp_sendstr_chunk(req, NULL);
-	
-	return(ESP_OK);
-}
-
-static const httpd_uri_t homepage = {
-    .uri       = "/",
-    .method    = HTTP_GET,
-    .handler   = homepage_get_handler,
-    /* Let's pass response string in user
-     * context to demonstrate it's usage */
-    .user_ctx  = "Home Page"
-};
-
-/* -----------------------------------------------------------
-| 	favicon_get_handler()
-|	HTTP clients expect an icon from all HTTP servers as a
-| 	standard feature 
-------------------------------------------------------------*/
-static esp_err_t favicon_get_handler(httpd_req_t *req)
-{
-    extern const unsigned char favicon_ico_start[] asm("_binary_favicon_ico_start");
-    extern const unsigned char favicon_ico_end[]   asm("_binary_favicon_ico_end");
-    const size_t favicon_ico_size = (favicon_ico_end - favicon_ico_start);
-    httpd_resp_set_type(req, "image/x-icon");
-    httpd_resp_send(req, (const char *)favicon_ico_start, favicon_ico_size);
-    return ESP_OK;
-}
-
-static const httpd_uri_t favicon_ico = {
-    .uri       = "/favicon.ico",
-    .method    = HTTP_GET,
-    .handler   = favicon_get_handler,
-    /* Let's pass response string in user
-     * context to demonstrate it's usage */
-    .user_ctx  = "Favicon"
-};
-
-/* -----------------------------------------------------------
-| 	str2num()
-| 	Converts a number in the form of a string to numerical data
-| 	type. 
-| 	WARNING: The numbers represented as characters are expected
-|	to be decimal values. i.e., hex is not allowed
-------------------------------------------------------------*/
-uint16_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
-{
-	uint8_t index = 0;
-	uint16_t result = 0; // TODO: Re-examine. 0 could be a legit input
-
-	while(index < max_parse_len)
-	{
-		if(input_str[index] == delimiter) {
-			break;
-		}
-		
-		result = result*10 + (input_str[index] - 48);
-		index++;
-	}
-	
-	return result;
-}
-
-/* -----------------------------------------------------------
-| 	update_sysconfig()
-|	Parses the form string from HTTP client and updates the 
-| 	sysconfig values (runtime values as well as in the 
-| 	sysconfig.txt
-------------------------------------------------------------*/
-void update_sysconfig(char* form_str)
-{
-	char* tmpStr;
-	uint8_t first_slave_id, second_slave_id;
-	
-	static const char* config_file_name = "/spiffs/sysconfig.txt";
-	FILE* config_file = NULL;
-	
-	
-	// Parse the received string to obtain sysconfig information
-	tmpStr = strstr(form_str, "first_slave_id=") + strlen("first_slave_id=");
-	first_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
-
-	tmpStr = strstr(form_str, "second_slave_id=") + strlen("second_slave_id=");
-	second_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
-
-	// Debug prints
-	printf("First slave id: %d\n", first_slave_id);
-	printf("Second slave id: %d\n", second_slave_id);
-
-	sysconfig.first_slave_id = first_slave_id;
-	sysconfig.second_slave_id = second_slave_id;
-
-	config_file = fopen(config_file_name, "rb");
-	if (config_file == NULL) { // If config file isnt' present, create one with default values
-		ESP_LOGE(TAG, "Config file not present. Can't update sysconfig!");
-		abort();
-	}
-	
-	fclose(config_file);
-	config_file = fopen(config_file_name, "wb");
-
-	if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
-		ESP_LOGE(TAG, "Couldn't update sysconfig file although it is present");
-		abort();
-	} else {
-		ESP_LOGI(TAG, "Successfully updated sysconfig file");
-	}
-	fclose(config_file);
-}
-
-/* -----------------------------------------------------------
-| 	submit_post_handler()
-|	HTTP server side handler for GET reuests on /
-------------------------------------------------------------*/
-static esp_err_t submit_post_handler(httpd_req_t *req)
-{
-
-	char buf[FORM_DATA_BUF_SIZE + 1];
-	size_t ret, remaining = req->content_len;
-	uint16_t content_pos = 0;    
-
-	if (remaining > FORM_DATA_BUF_SIZE) {
-		ESP_LOGE(TAG, "HTTP form data larger than internal receive buffer");
-		httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Form data too long");
-		return(ESP_FAIL);
-	}
- 
-	// Read the data for the request
-	while(remaining > 0)
-	{
-    	if ((ret = httpd_req_recv(req, &buf[content_pos],
-    	                MIN(remaining, FORM_DATA_BUF_SIZE))) <= 0) {
-    	    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-    	        // Retry receiving if timeout occurred 
-    	        continue;
-    	    }
-    		
-    	    return(ESP_FAIL);
-    	}
-		
-		content_pos = content_pos + ret;
-		remaining -= ret;
-	}
-	
-	buf[FORM_DATA_BUF_SIZE]	= '\0'; // As a safety measure against pointer run away issues
-	printf("Received string: %s\n", buf);
-
-	update_sysconfig(buf);	
-
-	httpd_resp_send(req, NULL, 0);	
-	return(ESP_OK);
-
-}
-
-httpd_uri_t submit = {
-    .uri       = "/submit",   // Match all URIs of type /upload/path/to/file
-    .method    = HTTP_POST,
-    .handler   = submit_post_handler,
-    .user_ctx  = "Thanks for submitting the form"
-};
-
-/* -----------------------------------------------------------
-| 	start_webserver()
-|	Starts HTTP server for OTA updates 
-------------------------------------------------------------*/
-static httpd_handle_t start_webserver(void)
-{
-    httpd_handle_t server = NULL;
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
-    // Start the httpd server
-    ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
-    if (httpd_start(&server, &config) == ESP_OK) {
-        // Set URI handlers
-        ESP_LOGI(TAG, "Registering URI handlers");
-        httpd_register_uri_handler(server, &homepage);
-		httpd_register_uri_handler(server, &favicon_ico);
-		httpd_register_uri_handler(server, &submit);
-			
-        return server;
-    }
-
-    ESP_LOGI(TAG, "Error starting server!");
-    return NULL;
-}
 
 /* -----------------------------------------------------------
 | 	read_sysconfig()
