@@ -156,20 +156,6 @@ menu "Example Configuration"
 			help
 				Third register to read
 		
-		config MAX_MODBUS_SLAVES
-			int "Max number of slaves"
-			range 1 10
-			default 2
-			help
-				Max number of slaves a device can have
-		
-		config MAX_MODBUS_REGISTERS
-			int "Max registers per slave"
-			range 1 10
-			default 3
-			help 
-				Max number of registers (per slave) that can be sent over MQTT to AWS
-
 		config SAMPLING_PERIOD
 			int "Sampling period in seconds"
 			range 0 600

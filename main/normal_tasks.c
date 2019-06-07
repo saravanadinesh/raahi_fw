@@ -431,38 +431,62 @@ void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {
     }
 }
 
-IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic, uint8_t slave_id, uint16_t reg_address)
+IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 {
 	uint16_t modbus_read_result;
     IoT_Publish_Message_Params paramsQOS;
     char cPayload[100];
-   	char full_topic[MAX_TOPIC_LEN + 1];	
+   	char *full_topic;	
     IoT_Error_t rc = FAILURE;
+	uint8_t slave_id_idx, reg_address_idx;
 	
 	if ((strlen(sysconfig.topic) + strlen(topic)) > MAX_TOPIC_LEN) {
 		ESP_LOGE(TAG, "MQTT topic is too long");
 	}
-	full_topic = strcat(sysconfig.topic, topic);
-	printf("MQTT topic: %s\n", full_topic); 
-  	
-	paramsQOS.qos = QOS0;
-    paramsQOS.payload = (void *) cPayload;
-    paramsQOS.isRetained = 0;
 	
-	if(modbus_read(slave_id, reg_address, &modbus_read_result) == ESP_OK) {	
-		sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
-				"Slave ID", slave_id, \
-				"Reg Add", reg_address, \
-				"Reg Val", modbus_read_result);
-    	paramsQOS.payloadLen = strlen(cPayload);
-    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
-    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
-    	    rc = SUCCESS;
-    	}
-	} else {
-		ESP_LOGI(TAG, "Error reading modbus data");
-	} 
+	full_topic = (char*)calloc(MAX_TOPIC_LEN+1, sizeof(char));
+	full_topic = strcat(sysconfig.topic, topic);
+
+	printf("MQTT topic: %s\n", full_topic); 
+	
+	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
+	{	
+		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
+			break;
+		}
+		
+		for (reg_address_idx = 0; reg_address_idx < MAX_MODBUS_REGISTERS; reg_address_idx++)
+		{
+			if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
+				break;
+			}
+
+			paramsQOS.qos = QOS1;
+		    paramsQOS.payload = (void *) cPayload;
+		    paramsQOS.isRetained = 0;
+			
+			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
+				sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
+						"Slave ID", sysconfig.slave_id[slave_id_idx], \
+						"Reg Add", sysconfig.reg_address[reg_address_idx], \
+						"Reg Val", modbus_read_result);
+		    	paramsQOS.payloadLen = strlen(cPayload);
+		    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
+		    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+		    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
+		    	    rc = SUCCESS; // TODO: Why arvind over wrote rc? Ask him and clean up
+		    	}
+			} else {
+				ESP_LOGI(TAG, "Error reading modbus data");
+				rc = FAILURE;
+				return(rc);
+			} 
+	
+		}
+	}
+	
+	return(rc);
+  	
 }
 
 void aws_iot_task(void *param) {
@@ -476,8 +500,10 @@ void aws_iot_task(void *param) {
     IoT_Client_Init_Params mqttInitParams = iotClientInitParamsDefault;
     IoT_Client_Connect_Params connectParams = iotClientConnectParamsDefault;
 
-    ESP_LOGI(TAG, "AWS TOPIC is IMEI:%s of length %d", topic, TOPIC_LEN);
-    ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
+    char cPayload[100];
+   	char *full_topic;	
+    
+	ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
 
     mqttInitParams.enableAutoReconnect = false; // We enable this later below
     mqttInitParams.pHostURL = HostAddress;
@@ -561,7 +587,7 @@ void aws_iot_task(void *param) {
         abort();
     }
 
-    sprintf(cPayload, "%s : %d ", "hello from SDK", i);
+    //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
 
     while((NETWORK_ATTEMPTING_RECONNECT == rc || NETWORK_RECONNECTED == rc || SUCCESS == rc)) {
 
@@ -573,29 +599,10 @@ void aws_iot_task(void *param) {
         }
 
         ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
-        vTaskDelay(1000 / portTICK_RATE_MS);
-        //sprintf(cPayload, "%s : %d ", "hello from ESP32 (QOS0)", i++);
-        //paramsQOS0.payloadLen = strlen(cPayload);
-        //rc = aws_iot_mqtt_publish(&client, TOPIC, TOPIC_LEN, &paramsQOS0);
 	
-		uint8_t slave_id, slave_id_idx;
-		uint16_t reg_address, reg_address_idx;
+		send_sensor_data(&client, topic);
+        vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 	
-		for (slave_id_idx = 0; slave_id_idx < CONFIG_MAX_MODBUS_SLAVES; slave_id_idx++)
-		{	
-			if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
-				break;
-			}
-			
-			for (reg_address_idx = 0; reg_address_idx < CONFIG_MODBUS_REGISTERS; reg_address_idx++)
-			{
-				if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
-					break;
-				}
-	
-				send_sensor_data(&client, topic, sysconfig.first_slave_id, sysconfig.first_reg);
-			}
-		}
     }
 
     ESP_LOGE(TAG, "An error occurred in the main loop.");
@@ -642,6 +649,44 @@ void init_modbus() {
 
 }
 
+/* -----------------------------------------------------------
+| 	display_sysconfig()
+| 	Prints sysconfig values. Used for debugging only	
+------------------------------------------------------------*/
+void display_sysconfig(void)
+{
+	uint8_t slave_id_idx, reg_address_idx;
+
+	printf("**************** Syconfig Data ******************");
+
+	// Display slave IDs	
+	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
+	{	
+		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
+			break;
+		}
+		printf("Slave ID of Slave %d = %d\n", slave_id_idx + 1, sysconfig.slave_id[slave_id_idx]);
+	}
+	printf("\n");
+	
+	// Display register addresses
+	for (reg_address_idx = 0; reg_address_idx < MODBUS_REGISTERS; reg_address_idx++)
+	{
+		if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
+			break;
+		}
+		printf("Reg Address %d is %0x4X", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
+	}
+	printf("\n");
+
+	// Display the rest of the information
+	printf("Sampling period (sec): %d\n\n", sysconfig.sampling_period_in_sec);
+	
+	printf("Topic: %s\n\n", sysconfig.topic);
+	printf("Apn: %s\n\n", sysconfig.apn);
+	
+	printf("*************************************************");
+}
 
 /* -----------------------------------------------------------
 | 	read_sysconfig()
@@ -683,8 +728,7 @@ void read_sysconfig()
 		} else {
 			ESP_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
 			// Display what was read
-			ESP_LOGI(TAG, "First Slave's ID: %d\n", sysconfig.first_slave_id);
-			ESP_LOGI(TAG, "Second Slave's ID: %d\n", sysconfig.second_slave_id);
+			display_sysconfig();
 		}
 	}
 }

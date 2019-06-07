@@ -28,6 +28,9 @@
 static const char *TAG = "http_server";
 extern struct config_struct sysconfig;
 
+// Function declarations
+void display_sysconfig();
+
 /* -----------------------------------------------------------
 | 	homepage_get_handler()
 |	HTTP server side handler for GET reuests on /
@@ -113,7 +116,7 @@ static uint16_t str2num(char* input_str, const char delimiter, uint8_t max_parse
 void update_sysconfig(char* form_str)
 {
 	char* tmpStr;
-	uint8_t first_slave_id, second_slave_id;
+	uint8_t tmpIndex;
 	
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
@@ -121,17 +124,51 @@ void update_sysconfig(char* form_str)
 	
 	// Parse the received string to obtain sysconfig information
 	tmpStr = strstr(form_str, "first_slave_id=") + strlen("first_slave_id=");
-	first_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
+	sysconfig.slave_id[0] = (uint8_t)str2num(tmpStr, '&', 4);
 
 	tmpStr = strstr(form_str, "second_slave_id=") + strlen("second_slave_id=");
-	second_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
+	sysconfig.slave_id[1] = (uint8_t)str2num(tmpStr, '&', 4);
+
+	tmpStr = strstr(form_str, "first_reg_address=") + strlen("first_reg_address=");
+	sysconfig.reg_address[0] = (uint8_t)str2num(tmpStr, '&', 6);
+	
+	tmpStr = strstr(form_str, "second_reg_address=") + strlen("second_reg_address=");
+	sysconfig.reg_address[1] = (uint8_t)str2num(tmpStr, '&', 6);
+	
+	tmpStr = strstr(form_str, "third_reg_address=") + strlen("third_reg_address=");
+	sysconfig.reg_address[2] = (uint8_t)str2num(tmpStr, '&', 6);
+
+	tmpStr = strstr(form_str, "sampling_period_in_sec=") + strlen("sampling_period_in_sec=");
+	sysconfig.sampling_period_in_sec = (uint8_t)str2num(tmpStr, '&', 4);
+ 		
+	tmpStr = strstr(form_str, "topic=") + strlen("topic=");
+	tmpIndex = 0;
+	while(tmpStr[tmpIndex] != '&') 
+	{
+		sysconfig.topic[tmpIndex] = tmpStr[tmpIndex];
+		if (tmpIndex > MAX_TOPIC_LEN) {
+			break;
+		}
+		tmpIndex++;
+	}
+	
+	sysconfig.topic[tmpIndex] = '\0';
+
+	tmpStr = strstr(form_str, "apn=") + strlen("apn=");
+	tmpIndex = 0;
+	while(tmpStr[tmpIndex] != '&') 
+	{
+		sysconfig.apn[tmpIndex] = tmpStr[tmpIndex];
+		if (tmpIndex > MAX_APN_LEN) {
+			break;
+		}
+		tmpIndex++;
+	}
+	
+	sysconfig.apn[tmpIndex] = '\0';
 
 	// Debug prints
-	printf("First slave id: %d\n", first_slave_id);
-	printf("Second slave id: %d\n", second_slave_id);
-
-	sysconfig.first_slave_id = first_slave_id;
-	sysconfig.second_slave_id = second_slave_id;
+	display_sysconfig();
 
 	config_file = fopen(config_file_name, "rb");
 	if (config_file == NULL) { // If config file isnt' present, create one with default values
