@@ -50,19 +50,22 @@
 #include "esp_modem.h"
 #include "sim800.h"
 #include "soc/uart_struct.h"
+#include <esp_http_server.h>
 
-
+#include "raahi.h"
 /* The examples use simple WiFi configuration that you can set via
    'make menuconfig'.
 
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
+#define FORM_DATA_BUF_SIZE 256
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
 #define MODEM_SMS_MAX_LENGTH (128)
 #define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
 #define MODEM_PROMPT_TIMEOUT_MS (10)
+
 
 static const int CONNECT_BIT = BIT0;
 static const int CONNECTED_BIT = BIT0;
@@ -114,6 +117,8 @@ static const char * ROOT_CA_PATH = CONFIG_EXAMPLE_ROOT_CA_PATH;
  * @brief Default MQTT HOST URL is pulled from the aws_iot_config.h
  */
 char HostAddress[255] = AWS_IOT_MQTT_HOST;
+
+struct config_struct sysconfig;
 
 /**
  * This is a example example which echos any data it receives on UART back to the sender.
@@ -224,17 +229,17 @@ uint16_t usMBCRC16( uint8_t* pucFrame, uint16_t usLen )
 uint16_t echo_task()
 {
 	    // Compose modbus command for sapcon slave
-               uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE);
-               uint8_t* data_in = (uint8_t*) malloc(BUF_SIZE);
-               data_out[0] = 0x01;
-               data_out[1] = 0x03;
-               data_out[2] = 0x00;
-               data_out[3] = 0xd5;
-               data_out[4] = 0x00;
-               data_out[5] = 0x02;
-               data_out[6] = 0xd5;
-               data_out[7] = 0xf3;
-                modbus_crc = usMBCRC16(data_out, 6);
+        uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE);
+        uint8_t* data_in = (uint8_t*) malloc(BUF_SIZE);
+        data_out[0] = 0x01;
+        data_out[1] = 0x03;
+        data_out[2] = 0x00;
+        data_out[3] = 0xd5;
+        data_out[4] = 0x00;
+        data_out[5] = 0x02;
+        data_out[6] = 0xd5;
+        data_out[7] = 0xf3;
+        modbus_crc = usMBCRC16(data_out, 6);
 		printf("modbus_crc = 0x%.04X", modbus_crc);
 		printf("\n");
 
@@ -588,25 +593,7 @@ void aws_iot_task(void *param) {
     abort();
 }
 
-static void initialise_wifi(void)
-{
-    tcpip_adapter_init(); // TODO: Remove this?
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = EXAMPLE_WIFI_SSID,
-            .password = EXAMPLE_WIFI_PASS,
-        },
-    };
-    ESP_LOGI(TAG, "Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    ESP_ERROR_CHECK( esp_wifi_start() );
-}
+
 void init_modbus() {
     uart_config_t uart_config = {
         .baud_rate = BAUD_RATE,
@@ -645,9 +632,258 @@ void init_modbus() {
     uart_write_bytes(uart_num, "Start RS485 UART test.\r\n", 24);
 
 }
+
+/* -----------------------------------------------------------
+| 	homepage_get_handler()
+|	HTTP server side handler for GET reuests on /
+------------------------------------------------------------*/
+static esp_err_t homepage_get_handler(httpd_req_t *req)
+{
+     /* Get handle to embedded file upload script */
+    extern const unsigned char homepage_start[] asm("_binary_index_html_start");
+    extern const unsigned char homepage_end[]   asm("_binary_index_html_end");
+    const size_t homepage_size = (homepage_end - homepage_start);
+	
+	//httpd_resp_set_type(req, "text/html"); 
+    httpd_resp_send_chunk(req, (const char *)homepage_start, homepage_size);
+    httpd_resp_sendstr_chunk(req, NULL);
+	
+	return(ESP_OK);
+}
+
+static const httpd_uri_t homepage = {
+    .uri       = "/",
+    .method    = HTTP_GET,
+    .handler   = homepage_get_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = "Home Page"
+};
+
+/* -----------------------------------------------------------
+| 	favicon_get_handler()
+|	HTTP clients expect an icon from all HTTP servers as a
+| 	standard feature 
+------------------------------------------------------------*/
+static esp_err_t favicon_get_handler(httpd_req_t *req)
+{
+    extern const unsigned char favicon_ico_start[] asm("_binary_favicon_ico_start");
+    extern const unsigned char favicon_ico_end[]   asm("_binary_favicon_ico_end");
+    const size_t favicon_ico_size = (favicon_ico_end - favicon_ico_start);
+    httpd_resp_set_type(req, "image/x-icon");
+    httpd_resp_send(req, (const char *)favicon_ico_start, favicon_ico_size);
+    return ESP_OK;
+}
+
+static const httpd_uri_t favicon_ico = {
+    .uri       = "/favicon.ico",
+    .method    = HTTP_GET,
+    .handler   = favicon_get_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = "Favicon"
+};
+
+/* -----------------------------------------------------------
+| 	str2num()
+| 	Converts a number in the form of a string to numerical data
+| 	type. 
+| 	WARNING: The numbers represented as characters are expected
+|	to be decimal values. i.e., hex is not allowed
+------------------------------------------------------------*/
+uint16_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
+{
+	uint8_t index = 0;
+	uint16_t result = 0; // TODO: Re-examine. 0 could be a legit input
+
+	while(index < max_parse_len)
+	{
+		if(input_str[index] == delimiter) {
+			break;
+		}
+		
+		result = result*10 + (input_str[index] - 48);
+		index++;
+	}
+	
+	return result;
+}
+
+/* -----------------------------------------------------------
+| 	update_sysconfig()
+|	Parses the form string from HTTP client and updates the 
+| 	sysconfig values (runtime values as well as in the 
+| 	sysconfig.txt
+------------------------------------------------------------*/
+void update_sysconfig(char* form_str)
+{
+	char* tmpStr;
+	uint8_t first_slave_id, second_slave_id;
+	
+	static const char* config_file_name = "/spiffs/sysconfig.txt";
+	FILE* config_file = NULL;
+	
+	
+	// Parse the received string to obtain sysconfig information
+	tmpStr = strstr(form_str, "first_slave_id=") + strlen("first_slave_id=");
+	first_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
+
+	tmpStr = strstr(form_str, "second_slave_id=") + strlen("second_slave_id=");
+	second_slave_id = (uint8_t)str2num(tmpStr, '&', 4);
+
+	// Debug prints
+	printf("First slave id: %d\n", first_slave_id);
+	printf("Second slave id: %d\n", second_slave_id);
+
+	sysconfig.first_slave_id = first_slave_id;
+	sysconfig.second_slave_id = second_slave_id;
+
+	config_file = fopen(config_file_name, "rb");
+	if (config_file == NULL) { // If config file isnt' present, create one with default values
+		ESP_LOGE(TAG, "Config file not present. Can't update sysconfig!");
+		abort();
+	}
+	
+	fclose(config_file);
+	config_file = fopen(config_file_name, "wb");
+
+	if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+		ESP_LOGE(TAG, "Couldn't update sysconfig file although it is present");
+		abort();
+	} else {
+		ESP_LOGI(TAG, "Successfully updated sysconfig file");
+	}
+}
+
+/* -----------------------------------------------------------
+| 	submit_post_handler()
+|	HTTP server side handler for GET reuests on /
+------------------------------------------------------------*/
+static esp_err_t submit_post_handler(httpd_req_t *req)
+{
+
+	char buf[FORM_DATA_BUF_SIZE + 1];
+	size_t ret, remaining = req->content_len;
+	uint16_t content_pos = 0;    
+
+	if (remaining > FORM_DATA_BUF_SIZE) {
+		ESP_LOGE(TAG, "HTTP form data larger than internal receive buffer");
+		httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Form data too long");
+		return(ESP_FAIL);
+	}
+ 
+	// Read the data for the request
+	while(remaining > 0)
+	{
+    	if ((ret = httpd_req_recv(req, &buf[content_pos],
+    	                MIN(remaining, FORM_DATA_BUF_SIZE))) <= 0) {
+    	    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+    	        // Retry receiving if timeout occurred 
+    	        continue;
+    	    }
+    		
+    	    return(ESP_FAIL);
+    	}
+		
+		content_pos = content_pos + ret;
+		remaining -= ret;
+	}
+	
+	buf[FORM_DATA_BUF_SIZE]	= '\0'; // As a safety measure against pointer run away issues
+	printf("Received string: %s\n", buf);
+
+	update_sysconfig(buf);	
+
+	httpd_resp_send(req, NULL, 0);	
+	return(ESP_OK);
+
+}
+
+httpd_uri_t submit = {
+    .uri       = "/submit",   // Match all URIs of type /upload/path/to/file
+    .method    = HTTP_POST,
+    .handler   = submit_post_handler,
+    .user_ctx  = "Thanks for submitting the form"
+};
+
+/* -----------------------------------------------------------
+| 	start_webserver()
+|	Starts HTTP server for OTA updates 
+------------------------------------------------------------*/
+static httpd_handle_t start_webserver(void)
+{
+    httpd_handle_t server = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+    // Start the httpd server
+    ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
+    if (httpd_start(&server, &config) == ESP_OK) {
+        // Set URI handlers
+        ESP_LOGI(TAG, "Registering URI handlers");
+        httpd_register_uri_handler(server, &homepage);
+		httpd_register_uri_handler(server, &favicon_ico);
+		httpd_register_uri_handler(server, &submit);
+			
+        return server;
+    }
+
+    ESP_LOGI(TAG, "Error starting server!");
+    return NULL;
+}
+
+/* -----------------------------------------------------------
+| 	read_sysconfig()
+| 	We store all the system configuration options that can be
+| 	changed at run-time to a file in spiffs so that it can 
+|	persist between boots 
+------------------------------------------------------------*/
+void read_sysconfig()
+{
+	static const char* config_file_name = "/spiffs/sysconfig.txt";
+	FILE* config_file = NULL;
+	struct config_struct default_config;
+	
+	// Populate the default config
+	default_config.first_slave_id = CONFIG_FIRST_SLAVE_ID; // From sdkconfig	
+	default_config.second_slave_id = CONFIG_SECOND_SLAVE_ID;
+	default_config.apn = CONFIG_ESP_MODEM_APN;
+
+	config_file = fopen(config_file_name, "rb");
+	if (config_file == NULL) { // If config file isnt' present, create one with default values
+		ESP_LOGI(TAG, "Config file not present. Creating one with default values");
+		config_file = fopen(config_file_name, "wb");
+		
+		if (fwrite(&default_config, sizeof(struct config_struct), 1, config_file) != 1) {
+			ESP_LOGE(TAG, "Couldn't write to Spiffs file sysconfig.txt");
+			fclose(config_file);
+			abort();
+		} else {
+			ESP_LOGI(TAG, "Config file successfully populated with default values");
+			sysconfig = default_config; // Also populate the global variable that will be used by many functions
+			fclose(config_file);
+		}
+
+	} else { // sysconfig.txt file is present. So populate global variable with data from it
+		if(fread(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+			ESP_LOGE(TAG, "Couldn't read sysconfig.txt contents");
+			abort();
+		} else {
+			ESP_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
+		}
+	}
+}
+
+
 void normal_tasks()
 {
-    init_modbus();
+    static httpd_handle_t http_server = NULL;
+
+	read_sysconfig();
+	
+	// Get the homepage up: Initialize webserver, register all handlers
+    http_server = start_webserver();
+    
+	init_modbus();
     event_group = xEventGroupCreate();
     /* create dte object */
     esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();

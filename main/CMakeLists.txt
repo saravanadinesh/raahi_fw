@@ -1,7 +1,7 @@
 set(COMPONENT_SRCS "subscribe_publish_sample.c")
 set(COMPONENT_ADD_INCLUDEDIRS ".")
 
-set(COMPONENT_EMBED_FILES "favicon.ico" "ota_index.html")
+set(COMPONENT_EMBED_FILES "favicon.ico" "ota_index.html" "index.html")
 
 register_component()
 
