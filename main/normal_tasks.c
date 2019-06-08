@@ -440,12 +440,15 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
     IoT_Error_t rc = FAILURE;
 	uint8_t slave_id_idx, reg_address_idx;
 	
-	if ((strlen(sysconfig.topic) + strlen(topic)) > MAX_TOPIC_LEN) {
+	if ((strlen(sysconfig.topic) + strlen(topic)) > (MAX_TOPIC_LEN - 2)) { // minus 2 for the two backward slashes
 		ESP_LOGE(TAG, "MQTT topic is too long");
+		return rc;
 	}
 	
 	full_topic = (char*)calloc(MAX_TOPIC_LEN+1, sizeof(char));
-	full_topic = strcat(sysconfig.topic, topic);
+	full_topic = strcat("/", sysconfig.topic);
+	full_topic = strcat(full_topic, "/");
+	full_topic = strcat(full_topic, topic);
 
 	printf("MQTT topic: %s\n", full_topic); 
 	
@@ -491,7 +494,6 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 
 void aws_iot_task(void *param) {
 
-    int32_t i = 0;
     char *topic = (char *)param; 
 
     IoT_Error_t rc = FAILURE;
@@ -500,8 +502,16 @@ void aws_iot_task(void *param) {
     IoT_Client_Init_Params mqttInitParams = iotClientInitParamsDefault;
     IoT_Client_Connect_Params connectParams = iotClientConnectParamsDefault;
 
-    char cPayload[100];
    	char *full_topic;	
+	if ((strlen(sysconfig.topic) + strlen(topic)) > (MAX_TOPIC_LEN - 2)) { // minus 2 for the two backward slashes
+		ESP_LOGE(TAG, "MQTT topic is too long");
+		return rc;
+	}
+	
+	full_topic = (char*)calloc(MAX_TOPIC_LEN+1, sizeof(char));
+	full_topic = strcat("/", sysconfig.topic);
+	full_topic = strcat(full_topic, "/");
+	full_topic = strcat(full_topic, topic);
     
 	ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
 
@@ -581,7 +591,7 @@ void aws_iot_task(void *param) {
     }
 
     ESP_LOGI(TAG, "Subscribing...");
-    rc = aws_iot_mqtt_subscribe(&client, topic, TOPIC_LEN, QOS0, iot_subscribe_callback_handler, NULL);
+    rc = aws_iot_mqtt_subscribe(&client, full_topic, strlen(full_topic), QOS0, iot_subscribe_callback_handler, NULL);
     if(SUCCESS != rc) {
         ESP_LOGE(TAG, "Error subscribing : %d ", rc);
         abort();
@@ -670,7 +680,7 @@ void display_sysconfig(void)
 	printf("\n");
 	
 	// Display register addresses
-	for (reg_address_idx = 0; reg_address_idx < MODBUS_REGISTERS; reg_address_idx++)
+	for (reg_address_idx = 0; reg_address_idx < MAX_MODBUS_REGISTERS; reg_address_idx++)
 	{
 		if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
 			break;
@@ -702,9 +712,14 @@ void read_sysconfig()
 	size_t content_size;
 
 	// Populate the default config
-	default_config.first_slave_id = CONFIG_FIRST_SLAVE_ID; // From sdkconfig	
-	default_config.second_slave_id = CONFIG_SECOND_SLAVE_ID;
-	default_config.apn = CONFIG_ESP_MODEM_APN;
+	default_config.slave_id[0] = CONFIG_FIRST_SLAVE_ID; // From sdkconfig	
+	default_config.slave_id[1] = CONFIG_SECOND_SLAVE_ID;
+	default_config.reg_address[0] = CONFIG_FIRST_REG;
+	default_config.reg_address[1] = CONFIG_SECOND_REG;
+	default_config.reg_address[2] = CONFIG_THIRD_REG;
+	default_config.sampling_period_in_sec = CONFIG_SAMPLING_PERIOD;
+	strcpy(default_config.topic, CONFIG_MQTT_TOPIC_ROOT);
+	strcpy(default_config.apn, CONFIG_ESP_MODEM_APN);
 
 	config_file = fopen(config_file_name, "rb");
 	if (config_file == NULL) { // If config file isnt' present, create one with default values
