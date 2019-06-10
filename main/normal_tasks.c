@@ -436,22 +436,9 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 	uint16_t modbus_read_result;
     IoT_Publish_Message_Params paramsQOS;
     char cPayload[100];
-   	char *full_topic;	
-    IoT_Error_t rc = FAILURE;
+    IoT_Error_t rc = SUCCESS; // TODO: This is done so that modbus slave read error doesn't result in a restart
 	uint8_t slave_id_idx, reg_address_idx;
-	
-	if ((strlen(sysconfig.topic) + strlen(topic)) > (MAX_TOPIC_LEN - 2)) { // minus 2 for the two backward slashes
-		ESP_LOGE(TAG, "MQTT topic is too long");
-		return rc;
-	}
-	
-	full_topic = (char*)calloc(MAX_TOPIC_LEN+1, sizeof(char));
-	full_topic = strcat("/", sysconfig.topic);
-	full_topic = strcat(full_topic, "/");
-	full_topic = strcat(full_topic, topic);
-
-	printf("MQTT topic: %s\n", full_topic); 
-	
+		
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
@@ -469,20 +456,16 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 		    paramsQOS.isRetained = 0;
 			
 			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
-				sprintf(cPayload, "%s : 0x%02X\n, %s : 0x%04X\n, %s : 0x%04X ", \
+				sprintf(cPayload, "{%s : %d, %s : 0x%.4X, %s : 0x%.4X}", \
 						"Slave ID", sysconfig.slave_id[slave_id_idx], \
 						"Reg Add", sysconfig.reg_address[reg_address_idx], \
 						"Reg Val", modbus_read_result);
 		    	paramsQOS.payloadLen = strlen(cPayload);
-		    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
-		    	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-		    	    ESP_LOGW(TAG, "QOS1 publish ack not received.");
-		    	    rc = SUCCESS; // TODO: Why arvind over wrote rc? Ask him and clean up
-		    	}
+				ESP_LOGI(TAG, "Published to topic: %s", topic);
+				ESP_LOGI(TAG, "Message Json: %s", cPayload);
+		    	rc = aws_iot_mqtt_publish(client, topic, strlen(topic), &paramsQOS);
 			} else {
-				ESP_LOGI(TAG, "Error reading modbus data");
-				rc = FAILURE;
-				return(rc);
+				ESP_LOGI(TAG, "Error reading modbus data for slave %d, register %d", sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx]);
 			} 
 	
 		}
@@ -502,17 +485,11 @@ void aws_iot_task(void *param) {
     IoT_Client_Init_Params mqttInitParams = iotClientInitParamsDefault;
     IoT_Client_Connect_Params connectParams = iotClientConnectParamsDefault;
 
-   	char *full_topic;	
 	if ((strlen(sysconfig.topic) + strlen(topic)) > (MAX_TOPIC_LEN - 2)) { // minus 2 for the two backward slashes
 		ESP_LOGE(TAG, "MQTT topic is too long");
-		return rc;
+		return;
 	}
-	
-	full_topic = (char*)calloc(MAX_TOPIC_LEN+1, sizeof(char));
-	full_topic = strcat("/", sysconfig.topic);
-	full_topic = strcat(full_topic, "/");
-	full_topic = strcat(full_topic, topic);
-    
+
 	ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
 
     mqttInitParams.enableAutoReconnect = false; // We enable this later below
@@ -591,7 +568,7 @@ void aws_iot_task(void *param) {
     }
 
     ESP_LOGI(TAG, "Subscribing...");
-    rc = aws_iot_mqtt_subscribe(&client, full_topic, strlen(full_topic), QOS0, iot_subscribe_callback_handler, NULL);
+    rc = aws_iot_mqtt_subscribe(&client, topic, strlen(topic), QOS0, iot_subscribe_callback_handler, NULL);
     if(SUCCESS != rc) {
         ESP_LOGE(TAG, "Error subscribing : %d ", rc);
         abort();
@@ -599,14 +576,10 @@ void aws_iot_task(void *param) {
 
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
 
-    while((NETWORK_ATTEMPTING_RECONNECT == rc || NETWORK_RECONNECTED == rc || SUCCESS == rc)) {
+    while(rc >=0) {
 
         //Max time the yield function will wait for read messages
         rc = aws_iot_mqtt_yield(&client, 100);
-        if(NETWORK_ATTEMPTING_RECONNECT == rc) {
-            // If the client is attempting to reconnect we will skip the rest of the loop.
-            continue;
-        }
 
         ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 	
@@ -630,9 +603,6 @@ void init_modbus() {
         .rx_flow_ctrl_thresh = 122,
     };
 
-	uint8_t count;
-	uint16_t modbus_crc;
-    
     // Set UART log level
     esp_log_level_set(TAG, ESP_LOG_INFO);
     
@@ -667,7 +637,7 @@ void display_sysconfig(void)
 {
 	uint8_t slave_id_idx, reg_address_idx;
 
-	printf("**************** Syconfig Data ******************");
+	printf("**************** Syconfig Data ******************\n");
 
 	// Display slave IDs	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
@@ -685,7 +655,7 @@ void display_sysconfig(void)
 		if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
 			break;
 		}
-		printf("Reg Address %d is %0x4X", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
+		printf("Reg Address %d is 0x%.4X \n", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
 	}
 	printf("\n");
 
@@ -695,7 +665,7 @@ void display_sysconfig(void)
 	printf("Topic: %s\n\n", sysconfig.topic);
 	printf("Apn: %s\n\n", sysconfig.apn);
 	
-	printf("*************************************************");
+	printf("*************************************************\n");
 }
 
 /* -----------------------------------------------------------
@@ -752,6 +722,7 @@ void read_sysconfig()
 void normal_tasks()
 {
     static httpd_handle_t http_server = NULL;
+	uint8_t retries; 
 
 	read_sysconfig();
 	
@@ -762,12 +733,35 @@ void normal_tasks()
     event_group = xEventGroupCreate();
     /* create dte object */
     esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();
-    modem_dte_t *dte = esp_modem_dte_init(&config);
+
+    modem_dte_t *dte;
+	retries = 0;
+	while((dte = esp_modem_dte_init(&config)) == NULL)
+	{
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	    retries++;
+		if (retries > 5) {
+			ESP_LOGE(TAG, "DTE initialization did not work\n");
+			break;
+		}	
+	}
 
     /* Register event handler */
     ESP_ERROR_CHECK(esp_modem_add_event_handler(dte, modem_event_handler, NULL));
     /* create dce object */
-    modem_dce_t *dce = sim800_init(dte);
+
+	modem_dce_t *dce;
+	retries = 0;
+	while ((dce = sim800_init(dte)) == NULL) 
+	{
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	    retries++;
+		if (retries > 5) {
+			ESP_LOGE(TAG, "DCE initialization did not work\n");
+			break;
+		}	
+	}
+
     ESP_ERROR_CHECK(dce->set_flow_ctrl(dce, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce->store_profile(dce));
     /* Print Module ID, Operator, IMEI, IMSI */
@@ -777,14 +771,18 @@ void normal_tasks()
     ESP_LOGI(TAG, "IMSI: %s", dce->imsi);
     /* Get signal quality */
     uint32_t rssi = 0, ber = 0;
-    ESP_ERROR_CHECK(dce->get_signal_quality(dce, &rssi, &ber));
+    dce->get_signal_quality(dce, &rssi, &ber);
     ESP_LOGI(TAG, "rssi: %d, ber: %d", rssi, ber);
     /* Get battery voltage */
     uint32_t voltage = 0, bcs = 0, bcl = 0;
-    ESP_ERROR_CHECK(dce->get_battery_status(dce, &bcs, &bcl, &voltage));
+    dce->get_battery_status(dce, &bcs, &bcl, &voltage);
     ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
     /* Setup PPP environment */
-    esp_modem_setup_ppp(dte);
+    if(esp_modem_setup_ppp(dte) == ESP_FAIL) {
+		ESP_LOGE(TAG, "Modem PPP setup failed");
+		abort();
+	}
+	
     /* Wait for IP address */
     xEventGroupWaitBits(event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 //    xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);

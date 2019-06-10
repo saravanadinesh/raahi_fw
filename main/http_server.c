@@ -89,19 +89,28 @@ static const httpd_uri_t favicon_ico = {
 | 	WARNING: The numbers represented as characters are expected
 |	to be decimal values. i.e., hex is not allowed
 ------------------------------------------------------------*/
-static uint16_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
+static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
 {
 	uint8_t index = 0;
-	uint16_t result = 0; // TODO: Re-examine. 0 could be a legit input
+	int32_t result = 0; // TODO: Re-examine. 0 could be a legit input
 
 	while(index < max_parse_len)
 	{
+		if((uint8_t)input_str[index] > 57 || (uint8_t)input_str[index] < 48) {//If the character is not even a number
+			ESP_LOGI(TAG, "String entered has non (decimal) numbers");
+			return (-1);
+		}  
 		if(input_str[index] == delimiter) {
 			break;
 		}
 		
 		result = result*10 + (input_str[index] - 48);
 		index++;
+	}
+
+	if (index == max_parse_len) { // Delimiter wasn't detected
+		ESP_LOGI(TAG, "Delimiter wasn't detected");
+		return(-1);
 	}
 	
 	return result;
@@ -117,6 +126,7 @@ void update_sysconfig(char* form_str)
 {
 	char* tmpStr;
 	uint8_t tmpIndex;
+	int32_t  tmpVal;
 	
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
@@ -124,22 +134,34 @@ void update_sysconfig(char* form_str)
 	
 	// Parse the received string to obtain sysconfig information
 	tmpStr = strstr(form_str, "first_slave_id=") + strlen("first_slave_id=");
-	sysconfig.slave_id[0] = (uint8_t)str2num(tmpStr, '&', 4);
-
+	if((tmpVal = str2num(tmpStr, '&', 4)) >= 0) {
+		sysconfig.slave_id[0] = (uint8_t)tmpVal;
+	}
+ 
 	tmpStr = strstr(form_str, "second_slave_id=") + strlen("second_slave_id=");
-	sysconfig.slave_id[1] = (uint8_t)str2num(tmpStr, '&', 4);
+	if((tmpVal = str2num(tmpStr, '&', 4)) >= 0) {
+		sysconfig.slave_id[1] = (uint8_t)tmpVal;
+	}
 
 	tmpStr = strstr(form_str, "first_reg_address=") + strlen("first_reg_address=");
-	sysconfig.reg_address[0] = (uint8_t)str2num(tmpStr, '&', 6);
+	if((tmpVal = str2num(tmpStr, '&', 6)) >= 0) {
+		sysconfig.reg_address[0] = (uint16_t)tmpVal;
+	}	
 	
 	tmpStr = strstr(form_str, "second_reg_address=") + strlen("second_reg_address=");
-	sysconfig.reg_address[1] = (uint8_t)str2num(tmpStr, '&', 6);
+	if((tmpVal = str2num(tmpStr, '&', 6)) >= 0) {
+		sysconfig.reg_address[1] = (uint16_t)tmpVal;
+	}	
 	
 	tmpStr = strstr(form_str, "third_reg_address=") + strlen("third_reg_address=");
-	sysconfig.reg_address[2] = (uint8_t)str2num(tmpStr, '&', 6);
+	if((tmpVal = str2num(tmpStr, '&', 6)) >= 0) {
+		sysconfig.reg_address[2] = (uint16_t)tmpVal;
+	}	
 
 	tmpStr = strstr(form_str, "sampling_period_in_sec=") + strlen("sampling_period_in_sec=");
-	sysconfig.sampling_period_in_sec = (uint8_t)str2num(tmpStr, '&', 4);
+	if((tmpVal = str2num(tmpStr, '&', 4)) >= 0) {
+		sysconfig.sampling_period_in_sec = (uint8_t)tmpVal;
+	}
  		
 	tmpStr = strstr(form_str, "topic=") + strlen("topic=");
 	tmpIndex = 0;
@@ -150,8 +172,7 @@ void update_sysconfig(char* form_str)
 			break;
 		}
 		tmpIndex++;
-	}
-	
+	}	
 	sysconfig.topic[tmpIndex] = '\0';
 
 	tmpStr = strstr(form_str, "apn=") + strlen("apn=");
@@ -164,7 +185,6 @@ void update_sysconfig(char* form_str)
 		}
 		tmpIndex++;
 	}
-	
 	sysconfig.apn[tmpIndex] = '\0';
 
 	// Debug prints
