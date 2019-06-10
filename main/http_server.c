@@ -96,13 +96,14 @@ static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_
 
 	while(index < max_parse_len)
 	{
+		if(input_str[index] == delimiter) {
+			break;
+		}
+		
 		if((uint8_t)input_str[index] > 57 || (uint8_t)input_str[index] < 48) {//If the character is not even a number
 			ESP_LOGI(TAG, "String entered has non (decimal) numbers");
 			return (-1);
 		}  
-		if(input_str[index] == delimiter) {
-			break;
-		}
 		
 		result = result*10 + (input_str[index] - 48);
 		index++;

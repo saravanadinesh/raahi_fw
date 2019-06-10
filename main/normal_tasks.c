@@ -76,6 +76,7 @@ static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
 static const char *TAG = "normal_task";
 static EventGroupHandle_t event_group = NULL;
+static char *user_mqtt_str;
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t wifi_event_group;
@@ -438,7 +439,15 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
     char cPayload[100];
     IoT_Error_t rc = SUCCESS; // TODO: This is done so that modbus slave read error doesn't result in a restart
 	uint8_t slave_id_idx, reg_address_idx;
-		
+	
+	char full_topic[MAX_TOPIC_LEN + 1];
+
+	strcpy(full_topic, topic);
+	if ((strlen(full_topic) + strlen("/data")) > MAX_TOPIC_LEN) { // Topic is too long
+		return(rc);
+	} 
+	strcat(full_topic, "/data");	
+	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
@@ -456,14 +465,15 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 		    paramsQOS.isRetained = 0;
 			
 			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
-				sprintf(cPayload, "{%s : %d, %s : 0x%.4X, %s : 0x%.4X}", \
-						"Slave ID", sysconfig.slave_id[slave_id_idx], \
-						"Reg Add", sysconfig.reg_address[reg_address_idx], \
-						"Reg Val", modbus_read_result);
+				sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
+						"user_id", user_mqtt_str, \
+						"slave_id", sysconfig.slave_id[slave_id_idx], \
+						"reg_address", sysconfig.reg_address[reg_address_idx], \
+						"reg_value", modbus_read_result);
 		    	paramsQOS.payloadLen = strlen(cPayload);
-				ESP_LOGI(TAG, "Published to topic: %s", topic);
+				ESP_LOGI(TAG, "Published to topic: %s", full_topic);
 				ESP_LOGI(TAG, "Message Json: %s", cPayload);
-		    	rc = aws_iot_mqtt_publish(client, topic, strlen(topic), &paramsQOS);
+		    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
 			} else {
 				ESP_LOGI(TAG, "Error reading modbus data for slave %d, register %d", sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx]);
 			} 
@@ -477,7 +487,10 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 
 void aws_iot_task(void *param) {
 
-    char *topic = (char *)param; 
+	char topic[MAX_TOPIC_LEN + 1] = {'\0'};
+
+	strcat(topic, "/");
+	strcat(topic, CONFIG_MQTT_TOPIC_ROOT); 
 
     IoT_Error_t rc = FAILURE;
 
@@ -513,21 +526,6 @@ void aws_iot_task(void *param) {
     mqttInitParams.disconnectHandler = disconnectCallbackHandler;
     mqttInitParams.disconnectHandlerData = NULL;
 
-#ifdef CONFIG_EXAMPLE_SDCARD_CERTS
-    ESP_LOGI(TAG, "Mounting SD card...");
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 3,
-    };
-    sdmmc_card_t* card;
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SD card VFAT filesystem. Error: %s", esp_err_to_name(ret));
-        abort();
-    }
-#endif
 
     rc = aws_iot_mqtt_init(&client, &mqttInitParams);
     if(SUCCESS != rc) {
@@ -573,6 +571,7 @@ void aws_iot_task(void *param) {
         ESP_LOGE(TAG, "Error subscribing : %d ", rc);
         abort();
     }
+	ESP_LOGI(TAG, "Subscribed to %s", topic);
 
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
 
@@ -740,9 +739,9 @@ void normal_tasks()
 	{
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	    retries++;
-		if (retries > 5) {
+		if (retries > 30) {
 			ESP_LOGE(TAG, "DTE initialization did not work\n");
-			break;
+			abort();
 		}	
 	}
 
@@ -756,9 +755,9 @@ void normal_tasks()
 	{
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	    retries++;
-		if (retries > 5) {
+		if (retries > 30) {
 			ESP_LOGE(TAG, "DCE initialization did not work\n");
-			break;
+			abort();
 		}	
 	}
 
@@ -799,5 +798,6 @@ void normal_tasks()
 //    ESP_LOGI(TAG, "Power down");
 //    ESP_ERROR_CHECK(dce->deinit(dce));
 //    ESP_ERROR_CHECK(dte->deinit(dte));
-    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, (void *) dce->imei, 5, NULL, 1);
+	user_mqtt_str = dce->imei;
+    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 5, NULL, 1);
 }
