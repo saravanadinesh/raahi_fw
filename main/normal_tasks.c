@@ -161,7 +161,6 @@ struct config_struct sysconfig;
 uint32_t port = AWS_IOT_MQTT_PORT;
 const int uart_num = ECHO_UART_PORT;
 // Allocate buffers for UART
-uint16_t modbus_crc;
 const char *TOPIC = "test_topic/esp32";
 // Modbus CRC stuff
 static const uint8_t aucCRCHi[] = {
@@ -232,9 +231,12 @@ uint16_t usMBCRC16( uint8_t* pucFrame, uint16_t usLen )
 // An example of echo test with hardware flow control on UART
 static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* result)
 {
-    uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE);
+    uint8_t* data_out = (uint8_t*) malloc(BUF_SIZE); // TODO: This shouldn't be BUFSIZE which is used as UART buffer size
     uint8_t* data_in = (uint8_t*) malloc(BUF_SIZE);
+	uint16_t modbus_crc;
 
+	*result = 0;
+	
 	// Error Checks
 	if (slave_id == 0) { // Zero is not allowed
 		return(ESP_FAIL);
@@ -263,24 +265,25 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
     	//Write data back to UART
     	if ((len > 0) && (data_in[0] == data_out[0])) {
         	ESP_LOGI(TAG, "Received %u bytes:", len);
-        	printf("[ ");
-        	for (int i = 0; i < len; i++) {
-            	printf("0x%.2X ", (uint8_t)data_in[i]);
-        	}
-       		printf("] \n");
-			break;
+			modbus_crc = usMBCRC16(data_in, len-2);
+			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-1]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-2])) {
+				*result = ((uint16_t)data_in[len-4] << 8) | (uint16_t)data_in[len-3]; 
+				return(ESP_OK); 
+			} else // CRC error occurred
+				ESP_LOGI(TAG, "CRC Error occurred");
+				return(ESP_FAIL);
     	} else {
 			printf("Waiting for slave to respond \n");
 		}
 
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	} // end of for count..
-   	
-	*result = ((uint16_t)data_in[3] << 8) | (uint16_t)data_in[4]; 
-	return (ESP_OK); 
+	
+	ESP_LOGE(TAG, "Slave %d did not respond", slave_id);
+	return(ESP_FAIL);   	
 }
 
-static esp_err_t example_default_handle(modem_dce_t *dce, const char *line)
+static esp_err_t modem_default_handle(modem_dce_t *dce, const char *line)
 {
     esp_err_t err = ESP_FAIL;
     if (strstr(line, MODEM_RESULT_CODE_SUCCESS)) {
@@ -291,7 +294,7 @@ static esp_err_t example_default_handle(modem_dce_t *dce, const char *line)
     return err;
 }
 
-static esp_err_t example_handle_cmgs(modem_dce_t *dce, const char *line)
+static esp_err_t modem_handle_cmgs(modem_dce_t *dce, const char *line)
 {
     esp_err_t err = ESP_FAIL;
     if (strstr(line, MODEM_RESULT_CODE_SUCCESS)) {
@@ -304,31 +307,11 @@ static esp_err_t example_handle_cmgs(modem_dce_t *dce, const char *line)
     return err;
 }
 
-static esp_err_t event_handler(void *ctx, system_event_t *event)
-{
-    switch(event->event_id) {
-    case SYSTEM_EVENT_STA_START:
-        esp_wifi_connect();
-        break;
-    case SYSTEM_EVENT_STA_GOT_IP:
-        xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-        break;
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-        /* This is a workaround as ESP32 WiFi libs don't currently
-           auto-reassociate. */
-        esp_wifi_connect();
-        xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
-        break;
-    default:
-        break;
-    }
-    return ESP_OK;
-}
 
-static esp_err_t example_send_message_text(modem_dce_t *dce, const char *phone_num, const char *text)
+static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num, const char *text)
 {
     modem_dte_t *dte = dce->dte;
-    dce->handle_line = example_default_handle;
+    dce->handle_line = modem_default_handle;
     /* Set text mode */
     if (dte->send_cmd(dte, "AT+CMGF=1\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
         ESP_LOGE(TAG, "send command failed");
@@ -340,7 +323,7 @@ static esp_err_t example_send_message_text(modem_dce_t *dce, const char *phone_n
     }
     ESP_LOGD(TAG, "set message format ok");
     /* Specify character set */
-    dce->handle_line = example_default_handle;
+    dce->handle_line = modem_default_handle;
     if (dte->send_cmd(dte, "AT+CSCS=\"GSM\"\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
         ESP_LOGE(TAG, "send command failed");
         goto err;
@@ -357,7 +340,7 @@ static esp_err_t example_send_message_text(modem_dce_t *dce, const char *phone_n
     dte->send_wait(dte, command, length, "\r\n> ", MODEM_PROMPT_TIMEOUT_MS);
     /* end with CTRL+Z */
     snprintf(command, MODEM_SMS_MAX_LENGTH, "%s\x1A", text);
-    dce->handle_line = example_handle_cmgs;
+    dce->handle_line = modem_handle_cmgs;
     if (dte->send_cmd(dte, command, MODEM_COMMAND_TIMEOUT_SMS_MS) != ESP_OK) {
         ESP_LOGE(TAG, "send command failed");
         goto err;
@@ -474,8 +457,6 @@ IoT_Error_t send_sensor_data(AWS_IoT_Client *client, char *topic)
 				ESP_LOGI(TAG, "Published to topic: %s", full_topic);
 				ESP_LOGI(TAG, "Message Json: %s", cPayload);
 		    	rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
-			} else {
-				ESP_LOGI(TAG, "Error reading modbus data for slave %d, register %d", sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx]);
 			} 
 	
 		}
@@ -616,7 +597,7 @@ void init_modbus() {
 
     // Install UART driver (we don't need an event queue here)
     // In this example we don't even use a buffer for sending data.
-    uart_driver_install(uart_num, BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_driver_install(uart_num, BUF_SIZE * 2, 0, 0, NULL, 0);// TODO: Should queue size be zero? What about Tx buffer size? Revise
 
     // Set RS485 half duplex mode
     uart_set_mode(uart_num, UART_MODE_RS485_HALF_DUPLEX);
@@ -790,7 +771,7 @@ void normal_tasks()
 //    xEventGroupWaitBits(event_group, STOP_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 #if CONFIG_SEND_MSG
     const char *message = "Welcome to ESP32!";
-    ESP_ERROR_CHECK(example_send_message_text(dce, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
+    ESP_ERROR_CHECK(modem_send_message_text(dce, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
     ESP_LOGI(TAG, "Send send message [%s] ok", message);
 #endif
     /* Power down module */
