@@ -166,14 +166,15 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 	for (count = 0; count <5; count++)
 	{
 		//Read data from UART
-    	int len = uart_read_bytes(DATA_SAMPLING_UART, data_in, BUF_SIZE, PACKET_READ_TICS);
+    	int len = uart_read_bytes(DATA_SAMPLING_UART, data_in, MODBUS_BUF_SIZE, PACKET_READ_TICS);
     
     	//Write data back to UART
     	if ((len > 0) && (data_in[0] == data_out[0])) {
         	ESP_LOGI(TAG, "Received %u bytes:", len);
 			modbus_crc = usMBCRC16(data_in, len-2);
 			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-1]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-2])) {
-				*result = ((uint16_t)data_in[len-4] << 8) | (uint16_t)data_in[len-3]; 
+				*result = data_in[len-4];
+				*result = (*result << 8) | data_in[len-3]; 
 				return_val = ESP_OK;
 				break; 
 			} else // CRC error occurred
@@ -222,12 +223,19 @@ void modbus_sensor_task()
 
 			
 			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
-				sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
-						"user_id", user_mqtt_str, \
-						"slave_id", sysconfig.slave_id[slave_id_idx], \
-						"reg_address", sysconfig.reg_address[reg_address_idx], \
-						"reg_value", modbus_read_result);
-    			
+				if (user_mqtt_str != NULL) {
+					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
+							"user_id", user_mqtt_str, \
+							"slave_id", sysconfig.slave_id[slave_id_idx], \
+							"reg_address", sysconfig.reg_address[reg_address_idx], \
+							"reg_value", modbus_read_result);
+    			} else {
+					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
+							"user_id", "user_id_NA", \
+							"slave_id", sysconfig.slave_id[slave_id_idx], \
+							"reg_address", sysconfig.reg_address[reg_address_idx], \
+							"reg_value", modbus_read_result);
+				}
 				xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
 				xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
         		strcpy(data_json.packet[data_json.write_ptr], cPayload);

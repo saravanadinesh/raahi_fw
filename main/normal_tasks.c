@@ -528,6 +528,8 @@ void normal_tasks()
 	event_json.write_ptr = 0;
 
 	mqtt_rw_group = xEventGroupCreate();
+	xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+	xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
 	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
 	

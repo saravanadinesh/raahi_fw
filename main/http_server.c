@@ -113,6 +113,9 @@ static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_
 		ESP_LOGI(TAG, "Delimiter wasn't detected");
 		return(-1);
 	}
+	if (index == 0) { // User didn't enter any value
+		return(-1);
+	}
 	
 	return result;
 }
@@ -173,8 +176,11 @@ void update_sysconfig(char* form_str)
 			break;
 		}
 		tmpIndex++;
-	}	
-	sysconfig.topic[tmpIndex] = '\0';
+	}
+	if (tmpIndex != 0) { // Update only if user entered a value	
+		sysconfig.topic[tmpIndex] = '\0';
+	}
+	
 
 	tmpStr = strstr(form_str, "apn=") + strlen("apn=");
 	tmpIndex = 0;
@@ -186,7 +192,9 @@ void update_sysconfig(char* form_str)
 		}
 		tmpIndex++;
 	}
-	sysconfig.apn[tmpIndex] = '\0';
+	if (tmpIndex != 0) { // Update only if user entered a value	
+		sysconfig.apn[tmpIndex] = '\0';
+	}
 
 	// Debug prints
 	display_sysconfig();
