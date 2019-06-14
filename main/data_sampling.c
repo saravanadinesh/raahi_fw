@@ -13,8 +13,14 @@
 #include <limits.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "soc/uart_struct.h"
+#include "driver/uart.h"
+#include "esp32/rom/gpio.h"
+
+#include "raahi.h"
 
 // MODBUS related Defines 
 #define MODBUS_TXD   (23)
@@ -32,8 +38,9 @@
 #define BUF_SIZE        (127)
 #define BAUD_RATE       (9600)
 #define PACKET_READ_TICS        (100 / portTICK_RATE_MS)
-#define DATA_SAMPLING_UART          (UART_NUM_2)
+#define DATA_SAMPLING_UART      (UART_NUM_2)
 
+#define MODBUS_BUF_SIZE 128
 
 /* Global variables */
 static const char *TAG = "data_sampling_task";
@@ -89,6 +96,13 @@ static const uint8_t aucCRCLo[] = {
 };
 
 extern struct config_struct sysconfig;
+extern EventGroupHandle_t mqtt_rw_group;
+extern const int READ_OP_DONE;
+extern const int WRITE_OP_DONE;
+
+extern struct data_json_struct data_json;
+extern struct event_json_struct event_json;
+extern char *user_mqtt_str;
 
 
 /********************************************************************/
@@ -191,7 +205,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 void modbus_sensor_task()
 {
 	uint16_t modbus_read_result;
-    char cPayload[100];
+    char cPayload[DATA_JSON_STR_SIZE];
 	uint8_t slave_id_idx, reg_address_idx;
 	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
@@ -206,9 +220,6 @@ void modbus_sensor_task()
 				break;
 			}
 
-			paramsQOS.qos = QOS1;
-		    paramsQOS.payload = (void *) cPayload;
-		    paramsQOS.isRetained = 0;
 			
 			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
 				sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
@@ -216,10 +227,14 @@ void modbus_sensor_task()
 						"slave_id", sysconfig.slave_id[slave_id_idx], \
 						"reg_address", sysconfig.reg_address[reg_address_idx], \
 						"reg_value", modbus_read_result);
-		    	paramsQOS.payloadLen = strlen(cPayload);
-				//ESP_LOGI(TAG, "Published to topic: %s", full_topic);
-				ESP_LOGI(TAG, "Message Json: %s", cPayload);
-		    	//rc = aws_iot_mqtt_publish(client, full_topic, strlen(full_topic), &paramsQOS);
+    			
+				xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+				xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
+        		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
+				xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
+
+				ESP_LOGI(TAG, "Json Message: %s", cPayload);
 			} 
 	
 		} // End of for loop on reg_address_idx
