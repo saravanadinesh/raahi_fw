@@ -168,7 +168,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
     
     	//Write data back to UART
     	if ((len > 0) && (data_in[0] == data_out[0])) {
-        	ESP_LOGI(TAG, "Received %u bytes:", len);
+        	RAAHI_LOGI(TAG, "Received %u bytes:", len);
 			modbus_crc = usMBCRC16(data_in, len-2);
 			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-1]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-2])) {
 				*result = data_in[len-4];
@@ -176,7 +176,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 				return_val = ESP_OK;
 				break; 
 			} else // CRC error occurred
-				ESP_LOGI(TAG, "Modbus CRC Error occurred");
+				RAAHI_LOGI(TAG, "Modbus CRC Error occurred");
 				return_val = ESP_FAIL;
 				break;
     	} else {
@@ -187,7 +187,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 	} // end of for count..
 	
 	if (count == 5) {
-		ESP_LOGE(TAG, "Slave %d did not respond", slave_id);
+		RAAHI_LOGE(TAG, "Slave %d did not respond", slave_id);
 		return_val = ESP_FAIL;
 	}
 
@@ -240,7 +240,7 @@ void modbus_sensor_task()
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
 				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
-				ESP_LOGI(TAG, "Json Message: %s", cPayload);
+				RAAHI_LOGI(TAG, "Json Message: %s", cPayload);
 			} 
 	
 		} // End of for loop on reg_address_idx
@@ -286,7 +286,7 @@ void data_sampling_task(void *param)
 
 		modbus_sensor_task();
 
-        ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 
 		uart_wait_tx_done(DATA_SAMPLING_UART, 500 / portTICK_RATE_MS);
 		if (uart_driver_delete(DATA_SAMPLING_UART) == ESP_OK) { //End modbus related activity so that uart can be reused for GPS
@@ -306,12 +306,12 @@ void data_sampling_task(void *param)
 			uart_flush_input(DATA_SAMPLING_UART);
 			
 			if(uart_driver_delete(DATA_SAMPLING_UART) != ESP_OK) {
-				ESP_LOGE(TAG, "UART driver couldn't be deletedi to carry out sensor task");
+				RAAHI_LOGE(TAG, "UART driver couldn't be deletedi to carry out sensor task");
 				abort();
 			}
        		gpio_matrix_out(GPS_TASK_TXD, 0X100, 0, 0);
 		} else {
-			ESP_LOGI(TAG, "UART Driver couldn't be deleted for switching to GPS task");
+			RAAHI_LOGI(TAG, "UART Driver couldn't be deleted for switching to GPS task");
 		}
 
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);

@@ -105,7 +105,7 @@ static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_
 	}
 
 	if (index == max_parse_len) { // Delimiter wasn't detected
-		ESP_LOGI(TAG, "Delimiter wasn't detected");
+		RAAHI_LOGI(TAG, "Delimiter wasn't detected");
 		return(-1);
 	}
 	if (index == 0) { // User didn't enter any value
@@ -196,7 +196,7 @@ void update_sysconfig(char* form_str)
 
 	config_file = fopen(config_file_name, "rb");
 	if (config_file == NULL) { // If config file isnt' present, create one with default values
-		ESP_LOGE(TAG, "Config file not present. Can't update sysconfig!");
+		RAAHI_LOGE(TAG, "Config file not present. Can't update sysconfig!");
 		abort();
 	}
 	
@@ -204,10 +204,10 @@ void update_sysconfig(char* form_str)
 	config_file = fopen(config_file_name, "wb");
 
 	if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
-		ESP_LOGE(TAG, "Couldn't update sysconfig file although it is present");
+		RAAHI_LOGE(TAG, "Couldn't update sysconfig file although it is present");
 		abort();
 	} else {
-		ESP_LOGI(TAG, "Successfully updated sysconfig file");
+		RAAHI_LOGI(TAG, "Successfully updated sysconfig file");
 	}
 	fclose(config_file);
 }
@@ -224,7 +224,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	uint16_t content_pos = 0;    
 
 	if (remaining > FORM_DATA_BUF_SIZE) {
-		ESP_LOGE(TAG, "HTTP form data larger than internal receive buffer");
+		RAAHI_LOGE(TAG, "HTTP form data larger than internal receive buffer");
 		httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Form data too long");
 		return(ESP_FAIL);
 	}
@@ -247,7 +247,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	}
 	
 	buf[FORM_DATA_BUF_SIZE]	= '\0'; // As a safety measure against pointer run away issues
-	ESP_LOGI(TAG, "Received string: %s\n", buf);
+	RAAHI_LOGI(TAG, "Received string: %s\n", buf);
 
 	update_sysconfig(buf);	
 
@@ -273,10 +273,10 @@ httpd_handle_t start_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
     // Start the httpd server
-    ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
+    RAAHI_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
         // Set URI handlers
-        ESP_LOGI(TAG, "Registering URI handlers");
+        RAAHI_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &homepage);
 		httpd_register_uri_handler(server, &favicon_ico);
 		httpd_register_uri_handler(server, &submit);
@@ -284,7 +284,7 @@ httpd_handle_t start_webserver(void)
         return server;
     }
 
-    ESP_LOGI(TAG, "Error starting server!");
+    RAAHI_LOGI(TAG, "Error starting server!");
     return NULL;
 }
 

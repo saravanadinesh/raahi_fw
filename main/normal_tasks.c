@@ -180,25 +180,25 @@ static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num
     dce->handle_line = modem_default_handle;
     /* Set text mode */
     if (dte->send_cmd(dte, "AT+CMGF=1\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
+        RAAHI_LOGE(TAG, "send command failed");
         goto err;
     }
     if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "set message format failed");
+        RAAHI_LOGE(TAG, "set message format failed");
         goto err;
     }
-    ESP_LOGD(TAG, "set message format ok");
+    RAAHI_LOGD(TAG, "set message format ok");
     /* Specify character set */
     dce->handle_line = modem_default_handle;
     if (dte->send_cmd(dte, "AT+CSCS=\"GSM\"\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
+        RAAHI_LOGE(TAG, "send command failed");
         goto err;
     }
     if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "set character set failed");
+        RAAHI_LOGE(TAG, "set character set failed");
         goto err;
     }
-    ESP_LOGD(TAG, "set character set ok");
+    RAAHI_LOGD(TAG, "set character set ok");
     /* send message */
     char command[MODEM_SMS_MAX_LENGTH] = {0};
     int length = snprintf(command, MODEM_SMS_MAX_LENGTH, "AT+CMGS=\"%s\"\r", phone_num);
@@ -208,14 +208,14 @@ static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num
     snprintf(command, MODEM_SMS_MAX_LENGTH, "%s\x1A", text);
     dce->handle_line = modem_handle_cmgs;
     if (dte->send_cmd(dte, command, MODEM_COMMAND_TIMEOUT_SMS_MS) != ESP_OK) {
-        ESP_LOGE(TAG, "send command failed");
+        RAAHI_LOGE(TAG, "send command failed");
         goto err;
     }
     if (dce->state != MODEM_STATE_SUCCESS) {
-        ESP_LOGE(TAG, "send message failed");
+        RAAHI_LOGE(TAG, "send message failed");
         goto err;
     }
-    ESP_LOGD(TAG, "send message ok");
+    RAAHI_LOGD(TAG, "send message ok");
     return ESP_OK;
 err:
     return ESP_FAIL;
@@ -228,26 +228,26 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
         RAAHI_LOGI(TAG, "Modem PPP Started");
         break;
     case MODEM_EVENT_PPP_CONNECT:
-        ESP_LOGI(TAG, "Modem Connect to PPP Server");
+        RAAHI_LOGI(TAG, "Modem Connect to PPP Server");
         ppp_client_ip_info_t *ipinfo = (ppp_client_ip_info_t *)(event_data);
-        ESP_LOGI(TAG, "~~~~~~~~~~~~~~");
-        ESP_LOGI(TAG, "IP          : " IPSTR, IP2STR(&ipinfo->ip));
-        ESP_LOGI(TAG, "Netmask     : " IPSTR, IP2STR(&ipinfo->netmask));
-        ESP_LOGI(TAG, "Gateway     : " IPSTR, IP2STR(&ipinfo->gw));
-        ESP_LOGI(TAG, "Name Server1: " IPSTR, IP2STR(&ipinfo->ns1));
-        ESP_LOGI(TAG, "Name Server2: " IPSTR, IP2STR(&ipinfo->ns2));
-        ESP_LOGI(TAG, "~~~~~~~~~~~~~~");
+        RAAHI_LOGI(TAG, "~~~~~~~~~~~~~~");
+        RAAHI_LOGI(TAG, "IP          : " IPSTR, IP2STR(&ipinfo->ip));
+        RAAHI_LOGI(TAG, "Netmask     : " IPSTR, IP2STR(&ipinfo->netmask));
+        RAAHI_LOGI(TAG, "Gateway     : " IPSTR, IP2STR(&ipinfo->gw));
+        RAAHI_LOGI(TAG, "Name Server1: " IPSTR, IP2STR(&ipinfo->ns1));
+        RAAHI_LOGI(TAG, "Name Server2: " IPSTR, IP2STR(&ipinfo->ns2));
+        RAAHI_LOGI(TAG, "~~~~~~~~~~~~~~");
         xEventGroupSetBits(modem_event_group, CONNECT_BIT);
         break;
     case MODEM_EVENT_PPP_DISCONNECT:
-        ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
+        RAAHI_LOGI(TAG, "Modem Disconnect from PPP Server");
         break;
     case MODEM_EVENT_PPP_STOP:
-        ESP_LOGI(TAG, "Modem PPP Stopped");
+        RAAHI_LOGI(TAG, "Modem PPP Stopped");
         xEventGroupSetBits(modem_event_group, STOP_BIT);
         break;
     case MODEM_EVENT_UNKNOWN:
-        ESP_LOGW(TAG, "Unknow line received: %s", (char *)event_data);
+        RAAHI_LOGW(TAG, "Unknow line received: %s", (char *)event_data);
         break;
     default:
         break;
@@ -256,12 +256,12 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 
 void iot_subscribe_callback_handler(AWS_IoT_Client *pClient, char *topicName, uint16_t topicNameLen,
                                     IoT_Publish_Message_Params *params, void *pData) {
-    ESP_LOGI(TAG, "Subscribe callback");
-    ESP_LOGI(TAG, "%.*s\t%.*s", topicNameLen, topicName, (int) params->payloadLen, (char *)params->payload);
+    RAAHI_LOGI(TAG, "Subscribe callback");
+    RAAHI_LOGI(TAG, "%.*s\t%.*s", topicNameLen, topicName, (int) params->payloadLen, (char *)params->payload);
 }
 
 void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {
-    ESP_LOGW(TAG, "MQTT Disconnect");
+    RAAHI_LOGW(TAG, "MQTT Disconnect");
     IoT_Error_t rc = FAILURE;
 
     if(NULL == pClient) {
@@ -269,14 +269,14 @@ void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {
     }
 
     if(aws_iot_is_autoreconnect_enabled(pClient)) {
-        ESP_LOGI(TAG, "Auto Reconnect is enabled, Reconnecting attempt will start now");
+        RAAHI_LOGI(TAG, "Auto Reconnect is enabled, Reconnecting attempt will start now");
     } else {
-        ESP_LOGW(TAG, "Auto Reconnect not enabled. Starting manual reconnect...");
+        RAAHI_LOGW(TAG, "Auto Reconnect not enabled. Starting manual reconnect...");
         rc = aws_iot_mqtt_attempt_reconnect(pClient);
         if(NETWORK_RECONNECTED == rc) {
-            ESP_LOGW(TAG, "Manual Reconnect Successful");
+            RAAHI_LOGW(TAG, "Manual Reconnect Successful");
         } else {
-            ESP_LOGW(TAG, "Manual Reconnect Failed - %d", rc);
+            RAAHI_LOGW(TAG, "Manual Reconnect Failed - %d", rc);
         }
     }
 }
@@ -312,11 +312,11 @@ void aws_iot_task(void *param) {
     IoT_Client_Connect_Params connectParams = iotClientConnectParamsDefault;
 
 	if ((strlen(sysconfig.topic) + strlen(topic)) > (MAX_TOPIC_LEN - 2)) { // minus 2 for the two backward slashes
-		ESP_LOGE(TAG, "MQTT topic is too long");
+		RAAHI_LOGE(TAG, "MQTT topic is too long");
 		return;
 	}
 
-	ESP_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
+	RAAHI_LOGI(TAG, "AWS IoT SDK Version %d.%d.%d-%s", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_TAG);
 
     mqttInitParams.enableAutoReconnect = false; // We enable this later below
     mqttInitParams.pHostURL = HostAddress;
@@ -342,7 +342,7 @@ void aws_iot_task(void *param) {
 
     rc = aws_iot_mqtt_init(&client, &mqttInitParams);
     if(SUCCESS != rc) {
-        ESP_LOGE(TAG, "aws_iot_mqtt_init returned error : %d ", rc);
+        RAAHI_LOGE(TAG, "aws_iot_mqtt_init returned error : %d ", rc);
         abort();
     }
 
@@ -358,11 +358,11 @@ void aws_iot_task(void *param) {
     connectParams.clientIDLen = (uint16_t) strlen(CONFIG_AWS_EXAMPLE_CLIENT_ID);
     connectParams.isWillMsgPresent = false;
 
-    ESP_LOGI(TAG, "Connecting to AWS...");
+    RAAHI_LOGI(TAG, "Connecting to AWS...");
     do {
         rc = aws_iot_mqtt_connect(&client, &connectParams);
         if(SUCCESS != rc) {
-            ESP_LOGE(TAG, "Error(%d) connecting to %s:%d", rc, mqttInitParams.pHostURL, mqttInitParams.port);
+            RAAHI_LOGE(TAG, "Error(%d) connecting to %s:%d", rc, mqttInitParams.pHostURL, mqttInitParams.port);
             vTaskDelay(1000 / portTICK_RATE_MS);
         }
     } while(SUCCESS != rc);
@@ -374,17 +374,17 @@ void aws_iot_task(void *param) {
      */
     rc = aws_iot_mqtt_autoreconnect_set_status(&client, true);
     if(SUCCESS != rc) {
-        ESP_LOGE(TAG, "Unable to set Auto Reconnect to true - %d", rc);
+        RAAHI_LOGE(TAG, "Unable to set Auto Reconnect to true - %d", rc);
         abort();
     }
 
-    ESP_LOGI(TAG, "Subscribing...");
+    RAAHI_LOGI(TAG, "Subscribing...");
     rc = aws_iot_mqtt_subscribe(&client, topic, strlen(topic), QOS0, iot_subscribe_callback_handler, NULL);
     if(SUCCESS != rc) {
-        ESP_LOGE(TAG, "Error subscribing : %d ", rc);
+        RAAHI_LOGE(TAG, "Error subscribing : %d ", rc);
         abort();
     }
-	ESP_LOGI(TAG, "Subscribed to %s", topic);
+	RAAHI_LOGI(TAG, "Subscribed to %s", topic);
 
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
     dataPacket.qos = QOS0;
@@ -399,7 +399,7 @@ void aws_iot_task(void *param) {
         //Max time the yield function will wait for read messages
         rc = aws_iot_mqtt_yield(&client, 100);
 
-        ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 				
 		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
 			//xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
@@ -409,7 +409,7 @@ void aws_iot_task(void *param) {
 			dataPacket.payloadLen = strlen(dPayload);
         	rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
         	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	ESP_LOGW(TAG, "publish ack not received.");
+            	RAAHI_LOGW(TAG, "publish ack not received.");
             	rc = SUCCESS;
         	}
 			
@@ -424,7 +424,7 @@ void aws_iot_task(void *param) {
 			eventPacket.payloadLen = strlen(ePayload);
         	rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
         	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	ESP_LOGW(TAG, "publish ack not received.");
+            	RAAHI_LOGW(TAG, "publish ack not received.");
             	rc = SUCCESS;
         	}
 			
@@ -438,7 +438,7 @@ void aws_iot_task(void *param) {
 	
     }
 
-    ESP_LOGE(TAG, "An error occurred in the main loop.");
+    RAAHI_LOGE(TAG, "An error occurred in the main loop.");
     abort();
 }
 
@@ -452,7 +452,7 @@ void display_sysconfig(void)
 {
 	uint8_t slave_id_idx, reg_address_idx;
 
-	ESP_LOGI(TAG, "**************** Syconfig Data ******************");
+	RAAHI_LOGI(TAG, "**************** Syconfig Data ******************");
 
 	// Display slave IDs	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
@@ -460,7 +460,7 @@ void display_sysconfig(void)
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
 			break;
 		}
-		ESP_LOGI(TAG, "Slave ID of Slave %d = %d", slave_id_idx + 1, sysconfig.slave_id[slave_id_idx]);
+		RAAHI_LOGI(TAG, "Slave ID of Slave %d = %d", slave_id_idx + 1, sysconfig.slave_id[slave_id_idx]);
 	}
 	
 	// Display register addresses
@@ -469,16 +469,16 @@ void display_sysconfig(void)
 		if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
 			break;
 		}
-		ESP_LOGI(TAG, "Reg Address %d is 0x%.4X", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
+		RAAHI_LOGI(TAG, "Reg Address %d is 0x%.4X", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
 	}
 
 	// Display the rest of the information
-	ESP_LOGI(TAG, "Sampling period (sec): %d", sysconfig.sampling_period_in_sec);
+	RAAHI_LOGI(TAG, "Sampling period (sec): %d", sysconfig.sampling_period_in_sec);
 	
-	ESP_LOGI(TAG, "Topic: %s", sysconfig.topic);
-	ESP_LOGI(TAG, "Apn: %s", sysconfig.apn);
+	RAAHI_LOGI(TAG, "Topic: %s", sysconfig.topic);
+	RAAHI_LOGI(TAG, "Apn: %s", sysconfig.apn);
 	
-	ESP_LOGI(TAG, "*************************************************");
+	RAAHI_LOGI(TAG, "*************************************************");
 }
 
 /* -----------------------------------------------------------
@@ -506,25 +506,25 @@ void read_sysconfig()
 
 	config_file = fopen(config_file_name, "rb");
 	if (config_file == NULL) { // If config file isnt' present, create one with default values
-		ESP_LOGI(TAG, "Config file not present. Creating one with default values");
+		RAAHI_LOGI(TAG, "Config file not present. Creating one with default values");
 		config_file = fopen(config_file_name, "wb");
 		
 		if (fwrite(&default_config, sizeof(struct config_struct), 1, config_file) != 1) {
-			ESP_LOGE(TAG, "Couldn't write to Spiffs file sysconfig.txt");
+			RAAHI_LOGE(TAG, "Couldn't write to Spiffs file sysconfig.txt");
 			fclose(config_file);
 			abort();
 		} else {
-			ESP_LOGI(TAG, "Config file successfully populated with default values");
+			RAAHI_LOGI(TAG, "Config file successfully populated with default values");
 			sysconfig = default_config; // Also populate the global variable that will be used by many functions
 			fclose(config_file);
 		}
 
 	} else { // sysconfig.txt file is present. So populate global variable with data from it
 		if((content_size = fread(&sysconfig, sizeof(struct config_struct), 1, config_file)) != 1) {
-			ESP_LOGE(TAG, "Couldn't read sysconfig.txt contents");
+			RAAHI_LOGE(TAG, "Couldn't read sysconfig.txt contents");
 			abort();
 		} else {
-			ESP_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
+			RAAHI_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
 			// Display what was read
 			display_sysconfig();
 		}
@@ -565,7 +565,7 @@ void normal_tasks()
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	    retries++;
 		if (retries > 30) {
-			ESP_LOGE(TAG, "DTE initialization did not work\n");
+			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
 			abort();
 		}	
 	}
@@ -581,7 +581,7 @@ void normal_tasks()
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	    retries++;
 		if (retries > 30) {
-			ESP_LOGE(TAG, "DCE initialization did not work\n");
+			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
 			abort();
 		}	
 	}
@@ -589,21 +589,21 @@ void normal_tasks()
     ESP_ERROR_CHECK(dce->set_flow_ctrl(dce, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce->store_profile(dce));
     /* Print Module ID, Operator, IMEI, IMSI */
-    ESP_LOGI(TAG, "Module: %s", dce->name);
-    ESP_LOGI(TAG, "Operator: %s", dce->oper);
-    ESP_LOGI(TAG, "IMEI: %s", dce->imei);
-    ESP_LOGI(TAG, "IMSI: %s", dce->imsi);
+    RAAHI_LOGI(TAG, "Module: %s", dce->name);
+    RAAHI_LOGI(TAG, "Operator: %s", dce->oper);
+    RAAHI_LOGI(TAG, "IMEI: %s", dce->imei);
+    RAAHI_LOGI(TAG, "IMSI: %s", dce->imsi);
     /* Get signal quality */
     uint32_t rssi = 0, ber = 0;
     dce->get_signal_quality(dce, &rssi, &ber);
-    ESP_LOGI(TAG, "rssi: %d, ber: %d", rssi, ber);
+    RAAHI_LOGI(TAG, "rssi: %d, ber: %d", rssi, ber);
     /* Get battery voltage */
     uint32_t voltage = 0, bcs = 0, bcl = 0;
     dce->get_battery_status(dce, &bcs, &bcl, &voltage);
-    ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
+    RAAHI_LOGI(TAG, "Battery voltage: %d mV", voltage);
     /* Setup PPP environment */
     if(esp_modem_setup_ppp(dte) == ESP_FAIL) {
-		ESP_LOGE(TAG, "Modem PPP setup failed");
+		RAAHI_LOGE(TAG, "Modem PPP setup failed");
 		abort();
 	}
 	
@@ -616,11 +616,11 @@ void normal_tasks()
 #if CONFIG_SEND_MSG
     const char *message = "Welcome to ESP32!";
     ESP_ERROR_CHECK(modem_send_message_text(dce, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
-    ESP_LOGI(TAG, "Send send message [%s] ok", message);
+    RAAHI_LOGI(TAG, "Send send message [%s] ok", message);
 #endif
     /* Power down module */
 //    ESP_ERROR_CHECK(dce->power_down(dce));
-//    ESP_LOGI(TAG, "Power down");
+//    RAAHI_LOGI(TAG, "Power down");
 //    ESP_ERROR_CHECK(dce->deinit(dce));
 //    ESP_ERROR_CHECK(dte->deinit(dte));
 	user_mqtt_str = dce->imei;
