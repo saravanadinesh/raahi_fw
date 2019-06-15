@@ -23,28 +23,19 @@
  * Some setup is required. See example README for details.
  *
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <ctype.h>
-#include <unistd.h>
-#include <limits.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
-#include "esp_wifi.h"
-#include "esp_event_loop.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-//#include "driver/sdmmc_host.h" // TODO: This is probably not needed. Remove to save space
 #include "tcpip_adapter.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
 
 #include "aws_iot_config.h"
-#include "aws_iot_log.h"
 #include "aws_iot_version.h"
 #include "aws_iot_mqtt_client_interface.h"
 #include "esp_modem.h"
@@ -53,6 +44,7 @@
 #include <esp_http_server.h>
 
 #include "raahi.h"
+ 
 /* The examples use simple WiFi configuration that you can set via
    'make menuconfig'.
 
@@ -66,17 +58,19 @@
 #define MODEM_PROMPT_TIMEOUT_MS (10)
 #define MAX_TOPIC_LEN 30 
 
+char raahi_log_str[EVENT_JSON_STR_SIZE];
+
 // Function declarations
 httpd_handle_t start_webserver(void);
 void data_sampling_task(void*);
 
 static EventGroupHandle_t modem_event_group = NULL;
-EventGroupHandle_t mqtt_rw_group = NULL;
+//EventGroupHandle_t mqtt_rw_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
-const int READ_OP_DONE = BIT0;
-const int WRITE_OP_DONE = BIT1;
+//const int READ_OP_DONE = BIT0;
+//const int WRITE_OP_DONE = BIT1;
 
 static const char *TAG = "normal_task";
 
@@ -143,6 +137,17 @@ struct event_json_struct event_json;
  */
 
 uint32_t port = AWS_IOT_MQTT_PORT;
+
+void compose_mqtt_event(const char *TAG, char *msg)
+{
+    char cPayload[EVENT_JSON_STR_SIZE];
+	sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : \"%s\"}", \
+			"tag", TAG, \
+			"event_str", msg); 
+	
+	strcpy(event_json.packet[event_json.write_ptr], TAG);
+	event_json.write_ptr = (event_json.write_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+} 
 
 static esp_err_t modem_default_handle(modem_dce_t *dce, const char *line)
 {
@@ -220,7 +225,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 {
     switch (event_id) {
     case MODEM_EVENT_PPP_START:
-        ESP_LOGI(TAG, "Modem PPP Started");
+        RAAHI_LOGI(TAG, "Modem PPP Started");
         break;
     case MODEM_EVENT_PPP_CONNECT:
         ESP_LOGI(TAG, "Modem Connect to PPP Server");
@@ -281,6 +286,7 @@ void aws_iot_task(void *param) {
 
 	char topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char data_topic[MAX_TOPIC_LEN + 1] = {'\0'};
+	char event_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 
 
 	char dPayload[DATA_JSON_STR_SIZE] = {'\0'};
@@ -293,6 +299,8 @@ void aws_iot_task(void *param) {
 	strcpy(data_topic, topic);
 	strcat(data_topic, "/data");
 
+	strcpy(event_topic, topic);
+	strcat(event_topic, "/event");
 	
 	IoT_Publish_Message_Params dataPacket;
 	IoT_Publish_Message_Params eventPacket;
@@ -393,9 +401,9 @@ void aws_iot_task(void *param) {
 
         ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 				
-		if (data_json.write_ptr > data_json.read_ptr) { // Implies there are unsent mqtt messages
-			xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-			xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
+		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
+			//xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+			//xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
    			
 			strcpy(dPayload, data_json.packet[data_json.read_ptr]);     	
 			dataPacket.payloadLen = strlen(dPayload);
@@ -409,7 +417,21 @@ void aws_iot_task(void *param) {
 				data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
 			}
 
-			xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+		}
+		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
+			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
+			eventPacket.payloadLen = strlen(ePayload);
+        	rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
+        	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	ESP_LOGW(TAG, "publish ack not received.");
+            	rc = SUCCESS;
+        	}
+			
+			if (rc == SUCCESS) { 
+				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+			}
+
 		}
 	
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
@@ -430,7 +452,7 @@ void display_sysconfig(void)
 {
 	uint8_t slave_id_idx, reg_address_idx;
 
-	printf("**************** Syconfig Data ******************\n");
+	ESP_LOGI(TAG, "**************** Syconfig Data ******************");
 
 	// Display slave IDs	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
@@ -438,9 +460,8 @@ void display_sysconfig(void)
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
 			break;
 		}
-		printf("Slave ID of Slave %d = %d\n", slave_id_idx + 1, sysconfig.slave_id[slave_id_idx]);
+		ESP_LOGI(TAG, "Slave ID of Slave %d = %d", slave_id_idx + 1, sysconfig.slave_id[slave_id_idx]);
 	}
-	printf("\n");
 	
 	// Display register addresses
 	for (reg_address_idx = 0; reg_address_idx < MAX_MODBUS_REGISTERS; reg_address_idx++)
@@ -448,17 +469,16 @@ void display_sysconfig(void)
 		if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
 			break;
 		}
-		printf("Reg Address %d is 0x%.4X \n", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
+		ESP_LOGI(TAG, "Reg Address %d is 0x%.4X", reg_address_idx + 1, sysconfig.reg_address[reg_address_idx]);
 	}
-	printf("\n");
 
 	// Display the rest of the information
-	printf("Sampling period (sec): %d\n\n", sysconfig.sampling_period_in_sec);
+	ESP_LOGI(TAG, "Sampling period (sec): %d", sysconfig.sampling_period_in_sec);
 	
-	printf("Topic: %s\n\n", sysconfig.topic);
-	printf("Apn: %s\n\n", sysconfig.apn);
+	ESP_LOGI(TAG, "Topic: %s", sysconfig.topic);
+	ESP_LOGI(TAG, "Apn: %s", sysconfig.apn);
 	
-	printf("*************************************************\n");
+	ESP_LOGI(TAG, "*************************************************");
 }
 
 /* -----------------------------------------------------------
@@ -527,9 +547,9 @@ void normal_tasks()
 	event_json.read_ptr = 0;
 	event_json.write_ptr = 0;
 
-	mqtt_rw_group = xEventGroupCreate();
-	xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
-	xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
+	//mqtt_rw_group = xEventGroupCreate();
+	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
 	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
 	

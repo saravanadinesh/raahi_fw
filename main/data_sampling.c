@@ -6,11 +6,7 @@
 * etc
 **************************************************************/
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
-#include <unistd.h>
-#include <limits.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,6 +40,8 @@
 
 /* Global variables */
 static const char *TAG = "data_sampling_task";
+extern char raahi_log_str[EVENT_JSON_STR_SIZE];
+
 
 static const uint8_t aucCRCHi[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
@@ -236,11 +234,11 @@ void modbus_sensor_task()
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
 				}
-				xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-				xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
+				//xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+				//xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
         		strcpy(data_json.packet[data_json.write_ptr], cPayload);
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
-				xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
+				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
 				ESP_LOGI(TAG, "Json Message: %s", cPayload);
 			} 

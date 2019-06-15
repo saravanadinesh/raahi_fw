@@ -15,6 +15,45 @@
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 100
 
+#define RAAHI_LOGE( tag, format, ... ) do {\
+	ESP_LOGE(tag, format, ##__VA_ARGS__);\
+	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
+	strcat(raahi_log_str, " | ESP_LOGE");\
+	compose_mqtt_event(tag, raahi_log_str);\
+	}while(0)
+
+#define RAAHI_LOGW( tag, format, ... ) do {\
+	ESP_LOGW(tag, format, ##__VA_ARGS__);\
+	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
+	strcat(raahi_log_str, " | ESP_LOGW");\
+	compose_mqtt_event(tag, raahi_log_str);\
+	}while(0)
+
+#define RAAHI_LOGI(tag, format, ... ) do {\
+	ESP_LOGI(tag, format, ##__VA_ARGS__);\
+	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
+	strcat(raahi_log_str, " | ESP_LOGI");\
+	compose_mqtt_event(tag, raahi_log_str);\
+	}while(0)
+
+#define RAAHI_LOGD( tag, format, ... ) do {\
+	ESP_LOGD(tag, format, ##__VA_ARGS__);\
+	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
+	strcat(raahi_log_str, " | ESP_LOGD");\
+	compose_mqtt_event(tag, raahi_log_str);\
+	}while(0)
+
+#define RAAHI_LOGV( tag, format, ... ) do {\
+	ESP_LOGV(tag, format, ##__VA_ARGS__);\
+	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
+	strcat(raahi_log_str, " | ESP_LOGV");\
+	compose_mqtt_event(tag, raahi_log_str);\
+	}while(0)
+
+
+
+// Function declarations
+void compose_mqtt_event(const char *TAG, char *msg);
 
 // Data type definitions
 struct config_struct {

@@ -4,15 +4,9 @@
 * when in normal mode 
 **************************************************************/
 // Header files
-#include <stdio.h>
-#include <stdlib.h>
-#include <ctype.h>
-//#include <unistd.h>
-//#include <limits.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -27,6 +21,7 @@
 // External variables
 static const char *TAG = "http_server";
 extern struct config_struct sysconfig;
+extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 
 // Function declarations
 void display_sysconfig();
@@ -101,7 +96,7 @@ static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_
 		}
 		
 		if((uint8_t)input_str[index] > 57 || (uint8_t)input_str[index] < 48) {//If the character is not even a number
-			ESP_LOGI(TAG, "String entered has non (decimal) numbers");
+			RAAHI_LOGI(TAG, "String entered has non (decimal) numbers");
 			return (-1);
 		}  
 		
@@ -252,7 +247,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	}
 	
 	buf[FORM_DATA_BUF_SIZE]	= '\0'; // As a safety measure against pointer run away issues
-	printf("Received string: %s\n", buf);
+	ESP_LOGI(TAG, "Received string: %s\n", buf);
 
 	update_sysconfig(buf);	
 
