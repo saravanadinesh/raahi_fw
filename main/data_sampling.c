@@ -100,6 +100,7 @@ extern const int WRITE_OP_DONE;
 
 extern struct data_json_struct data_json;
 extern struct event_json_struct event_json;
+extern struct debug_data_struct debug_data;
 extern char *user_mqtt_str;
 
 
@@ -176,8 +177,8 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 				return_val = ESP_OK;
 				break; 
 			} else // CRC error occurred
-				RAAHI_LOGI(TAG, "Modbus CRC Error occurred");
-				return_val = ESP_FAIL;
+				RAAHI_LOGI(TAG, "Modbus CRC Error occurred. Expected: 0x%.4X,\t Got:0x%.2X%.2X", modbus_crc, data_in[len-2], data_in[len-1]);
+				return_val = ESP_ERR_INVALID_RESPONSE;
 				break;
     	} else {
 			printf("Waiting for slave to respond \n");
@@ -206,7 +207,8 @@ void modbus_sensor_task()
 	uint16_t modbus_read_result;
     char cPayload[DATA_JSON_STR_SIZE];
 	uint8_t slave_id_idx, reg_address_idx;
-	
+	esp_err_t modbus_read_ret_val;
+
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
@@ -219,8 +221,8 @@ void modbus_sensor_task()
 				break;
 			}
 
-			
-			if(modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result) == ESP_OK) {	
+			modbus_read_ret_val = modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result);
+			if(modbus_read_ret_val == ESP_OK) {	
 				if (user_mqtt_str != NULL) {
 					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
 							"user_id", user_mqtt_str, \
@@ -241,7 +243,19 @@ void modbus_sensor_task()
 				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
 				RAAHI_LOGI(TAG, "Json Message: %s", cPayload);
-			} 
+
+				// Updata debug data
+				debug_data.slave_info[slave_id_idx].status = CONNECTED_AND_UPDATING;
+				debug_data.slave_info[slave_id_idx].data[reg_address_idx] = modbus_read_result;
+	
+			} else if (modbus_read_ret_val == ESP_ERR_INVALID_RESPONSE) {// There was CRC error
+				debug_data.slave_info[slave_id_idx].status = CONNECTED_WITH_ISSUES;
+				debug_data.slave_info[slave_id_idx].data[reg_address_idx] = 0;
+			} else { // Slave didn't even respond
+				debug_data.slave_info[slave_id_idx].status = NOT_CONNECTED;
+				debug_data.slave_info[slave_id_idx].data[reg_address_idx] = 0;
+			}
+
 	
 		} // End of for loop on reg_address_idx
 	} // End of for loop on slave_id_idx

@@ -9,6 +9,7 @@ COMPONENT_EMBED_TXTFILES := certs/aws-root-ca.pem certs/certificate.pem.crt cert
 COMPONENT_EMBED_FILES := favicon.ico
 COMPONENT_EMBED_FILES += ota_index.html
 COMPONENT_EMBED_FILES += index.html
+COMPONENT_EMBED_FILES += info.html
 
 # Print an error if the certificate/key files are missing
 $(COMPONENT_PATH)/certs/certificate.pem.crt $(COMPONENT_PATH)/certs/private.pem.key:

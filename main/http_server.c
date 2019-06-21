@@ -21,6 +21,7 @@
 // External variables
 static const char *TAG = "http_server";
 extern struct config_struct sysconfig;
+extern struct debug_data_struct debug_data;
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 
 // Function declarations
@@ -75,6 +76,66 @@ static const httpd_uri_t favicon_ico = {
     /* Let's pass response string in user
      * context to demonstrate it's usage */
     .user_ctx  = "Favicon"
+};
+
+/* -----------------------------------------------------------
+| 	infopage_get_handler()
+|	HTTP server side handler for GET reuests on /info
+------------------------------------------------------------*/
+static esp_err_t infopage_get_handler(httpd_req_t *req)
+{
+     /* Get handle to embedded file upload script */
+    extern const unsigned char infopage_start[] asm("_binary_info_html_start");
+    extern const unsigned char infopage_end[]   asm("_binary_info_html_end");
+    const size_t infopage_size = (infopage_end - infopage_start);
+	uint8_t slave_id_idx, reg_address_idx;
+	char tempStr[MODEM_MAX_OPERATOR_LENGTH] = {'\0'};
+	
+	//httpd_resp_set_type(req, "text/html"); 
+    httpd_resp_send_chunk(req, (const char *)infopage_start, infopage_size);
+	sprintf(tempStr, "<tr><td>IMEI</td><td>%s</td></tr>\n", debug_data.imei); 
+	httpd_resp_sendstr_chunk(req, tempStr);
+	sprintf(tempStr, "<tr><td>Operator</td><td>%s</td></tr>\n", debug_data.oper);
+	httpd_resp_sendstr_chunk(req, tempStr);
+	sprintf(tempStr, "<tr><td>RSSI</td><td>%u</td></tr>\n", debug_data.rssi);
+	httpd_resp_sendstr_chunk(req, tempStr);
+	sprintf(tempStr, "<tr><td>BER</td><td>%u</td></tr>\n", debug_data.ber);
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
+	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
+	{	
+		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
+			break;
+		}
+		
+		for (reg_address_idx = 0; reg_address_idx < MAX_MODBUS_REGISTERS; reg_address_idx++)
+		{
+			if (sysconfig.reg_address[reg_address_idx] == 0) {// reg address 0 is considered to be unintialized entry
+				break;
+			}
+	
+			sprintf(tempStr, "<tr><td>Slave %u, Reg %u</td><td>0x%.4X</td></tr>\n", (slave_id_idx+1), sysconfig.reg_address[reg_address_idx], debug_data.slave_info[slave_id_idx].data[reg_address_idx]);
+	
+		}
+	}
+
+	httpd_resp_sendstr_chunk(req, "</tbody>\n");
+	httpd_resp_sendstr_chunk(req, "</table>\n");
+	httpd_resp_sendstr_chunk(req, "</body>\n");
+	httpd_resp_sendstr_chunk(req, "</html>\n");
+	
+    httpd_resp_sendstr_chunk(req, NULL);
+	
+	return(ESP_OK);
+}
+
+static const httpd_uri_t infopage = {
+    .uri       = "/info",
+    .method    = HTTP_GET,
+    .handler   = infopage_get_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = "Info Page"
 };
 
 /* -----------------------------------------------------------
@@ -278,6 +339,7 @@ httpd_handle_t start_webserver(void)
         // Set URI handlers
         RAAHI_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &homepage);
+        httpd_register_uri_handler(server, &infopage);
 		httpd_register_uri_handler(server, &favicon_ico);
 		httpd_register_uri_handler(server, &submit);
 			

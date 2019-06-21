@@ -350,6 +350,42 @@ static const httpd_uri_t submit = {
     .user_ctx  = "Thank You"
 };
 
+
+/* -----------------------------------------------------------
+| 	factory_reset_handler()
+|	Makes factory partition as the boot partition
+------------------------------------------------------------*/
+static esp_err_t factory_reset_handler(httpd_req_t *req)
+{
+    esp_err_t err;
+    const esp_partition_t *factory = esp_partition_find_first(ESP_PARTITION_TYPE_APP,
+                                                               ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+
+    err = esp_ota_set_boot_partition(factory);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Factory reset failed (%s)!", esp_err_to_name(err));
+        task_fatal_error();
+    } // TODO: Should we add IMAGE_VERIFY?
+	
+	httpd_resp_send(req, NULL, 0);
+	ESP_LOGI(TAG, "Factory reset successful");
+    ESP_LOGI(TAG, "Restarting system in 3 seconds!");
+    vTaskDelay(3000 / portTICK_RATE_MS);
+    esp_restart();
+
+	return ESP_OK;
+}
+
+static const httpd_uri_t factory_reset = {
+    .uri       = "/factory_reset",
+    .method    = HTTP_POST,
+    .handler   = factory_reset_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = NULL
+};
+
+
 /* -----------------------------------------------------------
 | 	start_ota_webserver()
 |	Starts HTTP server for OTA updates 
@@ -367,7 +403,7 @@ static httpd_handle_t start_ota_webserver(void)
         httpd_register_uri_handler(server, &ota_homepage);
 		httpd_register_uri_handler(server, &favicon_ico);
 		httpd_register_uri_handler(server, &submit);
-			
+		httpd_register_uri_handler(server, &factory_reset);		
         return server;
     }
 
@@ -494,7 +530,24 @@ void app_main()
 
     // Display the current firmware's version
 	const esp_partition_t *running = esp_ota_get_running_partition();
-    
+	switch (running -> subtype) { // We will assume that there will never be more than two OTA partitions
+		case ESP_PARTITION_SUBTYPE_APP_FACTORY:
+			ESP_LOGI(TAG, "Running FW from factory partition");
+			break;
+
+		case ESP_PARTITION_SUBTYPE_APP_OTA_0:
+			ESP_LOGI(TAG, "Running FW from OTA0 partition");
+			break;
+
+		case ESP_PARTITION_SUBTYPE_APP_OTA_1:
+			ESP_LOGI(TAG, "Running FW from OTA1 partition");
+			break;
+		
+		default: // We aren't supposed to be here!
+			ESP_LOGE(TAG, "We aren't running FW from factory or any OTA partition! Something is very wrong");
+			abort();
+	}
+		 
     esp_app_desc_t running_app_info;
     if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
         ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);

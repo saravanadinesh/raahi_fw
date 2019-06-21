@@ -122,8 +122,7 @@ char HostAddress[255] = AWS_IOT_MQTT_HOST;
 struct config_struct sysconfig;
 struct data_json_struct data_json;
 struct event_json_struct event_json;
- 
-
+struct debug_data_struct debug_data;
 /**
  * This is a example example which echos any data it receives on UART back to the sender.
  *
@@ -596,7 +595,13 @@ void normal_tasks()
     /* Get signal quality */
     uint32_t rssi = 0, ber = 0;
     dce->get_signal_quality(dce, &rssi, &ber);
-    RAAHI_LOGI(TAG, "rssi: %d, ber: %d", rssi, ber);
+    RAAHI_LOGI(TAG, "rssi: %u, ber: %u", rssi, ber);
+	
+	strcpy(debug_data.imei, dce->imei);
+	strcpy(debug_data.oper, dce->oper);
+	debug_data.rssi = rssi;
+	debug_data.ber = ber;
+
     /* Get battery voltage */
     uint32_t voltage = 0, bcs = 0, bcl = 0;
     dce->get_battery_status(dce, &bcs, &bcl, &voltage);

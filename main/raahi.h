@@ -15,6 +15,9 @@
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 100
 
+#define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
+#define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
+
 #define RAAHI_LOGE( tag, format, ... ) do {\
 	ESP_LOGE(tag, format, ##__VA_ARGS__);\
 	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
@@ -77,4 +80,21 @@ struct event_json_struct {
 	uint8_t write_ptr;
 };
 
+enum slave_status{
+	NOT_CONNECTED = 0,
+	CONNECTED_WITH_ISSUES = 1,
+	CONNECTED_AND_UPDATING = 2
+};
+
+struct slave_info_struct {
+	enum slave_status status;
+	uint16_t data[MAX_MODBUS_REGISTERS]; 
+};
+struct debug_data_struct {
+    char imei[MODEM_IMEI_LENGTH + 1]; 	
+ 	char oper[MODEM_MAX_OPERATOR_LENGTH];
+	uint32_t rssi;
+	uint32_t ber;
+	struct slave_info_struct slave_info[MAX_MODBUS_SLAVES];
+};
 #endif //#ifndef _RAAHI_FW_H_
