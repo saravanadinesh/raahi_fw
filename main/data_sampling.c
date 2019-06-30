@@ -151,16 +151,15 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 	// Compose modbus command 
     data_out[0] = slave_id;
     data_out[1] = 0x03;
-    data_out[2] = (uint8_t) (reg_address >> 8);
+    data_out[2] = (uint8_t) (reg_address >> 8);   // Reg address is transmitted MSByte first
     data_out[3] = (uint8_t) (reg_address & 0xFF);
-    data_out[4] = 0x00;
+    data_out[4] = 0x00; // Number of registers is transmitted MSByte first
     data_out[5] = 0x01;
 
 	// Calculate CRC for the command
     modbus_crc = usMBCRC16(data_out, 6);
-//Swapping high and low bytes
-    data_out[7] = (uint8_t) (modbus_crc >> 8);   
-    data_out[6] = (uint8_t) (modbus_crc & 0xFF); 
+    data_out[6] = (uint8_t) (modbus_crc & 0xFF); // IMPORTANT: CRC is transmitted LSByte first (unlike reg address and no. of registers)
+    data_out[7] = (uint8_t) (modbus_crc >> 8);    
 	
 	// Write modbus master command on rs485
     uart_write_bytes(DATA_SAMPLING_UART, (const char*)&data_out[0], 8);
@@ -173,7 +172,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
     	if ((len > 0) && (data_in[0] == data_out[0])) {
         	RAAHI_LOGI(TAG, "Received %u bytes:", len);
 			modbus_crc = usMBCRC16(data_in, len-2);
-			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-1]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-2])) {
+			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-2]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-1])) {
 				*result = data_in[len-4];
 				*result = (*result << 8) | data_in[len-3]; 
 				return_val = ESP_OK;
@@ -330,7 +329,7 @@ void data_sampling_task(void *param)
 			uart_set_mode(DATA_SAMPLING_UART, UART_MODE_UART);
 			uart_flush_input(DATA_SAMPLING_UART);
     		
-			gps_sampling_task();
+			//gps_sampling_task();
 			
 			uart_wait_tx_done(DATA_SAMPLING_UART, 500 / portTICK_RATE_MS);
 			uart_flush_input(DATA_SAMPLING_UART);

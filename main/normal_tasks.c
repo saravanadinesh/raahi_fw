@@ -567,7 +567,7 @@ void normal_tasks()
 	retries = 0;
 	while((dte = esp_modem_dte_init(&config)) == NULL)
 	{
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		vTaskDelay(10000 / portTICK_PERIOD_MS);
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
@@ -585,7 +585,7 @@ void normal_tasks()
     vTaskDelay(2000 / portTICK_PERIOD_MS);
 	while ((dce = sim800_init(dte)) == NULL) 
 	{
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		vTaskDelay(10000 / portTICK_PERIOD_MS);
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
@@ -634,7 +634,7 @@ void normal_tasks()
 #if CONFIG_SEND_MSG
     const char *message = "Welcome to ESP32!";
     ESP_ERROR_CHECK(modem_send_message_text(dce, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
-    RAAHI_LOGI(TAG, "Send send message [%s] ok", message);
+    RAAHI_LOGI(TAG, "Send message [%s] ok", message);
 #endif
     /* Power down module */
 //    ESP_ERROR_CHECK(dce->power_down(dce));
