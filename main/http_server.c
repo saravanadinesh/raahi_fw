@@ -283,6 +283,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	char buf[FORM_DATA_BUF_SIZE + 1];
 	size_t ret, remaining = req->content_len;
 	uint16_t content_pos = 0;    
+	RAAHI_LOGI(TAG, "HTTP post handler");
 
 	if (remaining > FORM_DATA_BUF_SIZE) {
 		RAAHI_LOGE(TAG, "HTTP form data larger than internal receive buffer");

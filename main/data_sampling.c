@@ -26,7 +26,7 @@
 
 // GPS receiver related Defines
 #define GPS_TASK_TXD   (18)
-#define GPS_TASK_RXD   (19)
+#define GPS_TASK_RXD   (27)
 #define GPS_TASK_RTS  UART_PIN_NO_CHANGE
 #define GPS_TASK_CTS  UART_PIN_NO_CHANGE
 
@@ -35,6 +35,7 @@
 #define BAUD_RATE       (9600)
 #define PACKET_READ_TICS        (100 / portTICK_RATE_MS)
 #define DATA_SAMPLING_UART      (UART_NUM_2)
+static const int RX_BUF_SIZE = 1024;
 
 #define MODBUS_BUF_SIZE 128
 
@@ -157,8 +158,9 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 
 	// Calculate CRC for the command
     modbus_crc = usMBCRC16(data_out, 6);
-    data_out[6] = (uint8_t) (modbus_crc >> 8);   
-    data_out[7] = (uint8_t) (modbus_crc & 0xFF); 
+//Swapping high and low bytes
+    data_out[7] = (uint8_t) (modbus_crc >> 8);   
+    data_out[6] = (uint8_t) (modbus_crc & 0xFF); 
 	
 	// Write modbus master command on rs485
     uart_write_bytes(DATA_SAMPLING_UART, (const char*)&data_out[0], 8);
@@ -268,8 +270,22 @@ void modbus_sensor_task()
 ------------------------------------------------------------*/
 void gps_sampling_task()
 {
-	uart_write_bytes(DATA_SAMPLING_UART, "I am now in the gps task\r\n", strlen("I am now in the gps task\r\n"));
-	return;
+	//uart_write_bytes(DATA_SAMPLING_UART, "I am now in the gps task\r\n", strlen("I am now in the gps task\r\n"));
+        static const char *RX_TASK_TAG = "GPS SAMPLING TASK";
+        ESP_LOGI(RX_TASK_TAG, "Inside GPS sampling task");
+        esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
+        uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE+1);
+        while (1) {
+          const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
+          if (rxBytes > 0) {
+            data[rxBytes] = 0;
+            ESP_LOGI(RX_TASK_TAG, "Read %d bytes: '%s'", rxBytes, data);
+            ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+            break;
+         }
+       }
+     free(data);
+     return;
 }
 
 /* -----------------------------------------------------------
