@@ -1,3 +1,6 @@
 
 *.old
 /build
+*.swp
+*.bin
+*.txt
