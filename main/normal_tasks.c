@@ -404,23 +404,17 @@ void aws_iot_task(void *param) {
 
         RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 				
-//		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
+		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
 			//xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
 			//xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
    			
-//			strcpy(dPayload, data_json.packet[data_json.read_ptr]);     	
- sprintf(dPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
-                                                        "user_id", "87654321123456", \
-                                                        "slave_id", 10, \
-                                                        "reg_address", 212, \
-                                                        "reg_value", 1234);
-
+			strcpy(dPayload, data_json.packet[data_json.read_ptr]);     	
 			dataPacket.payloadLen = strlen(dPayload);
         	rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
         	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
             	RAAHI_LOGW(TAG, "publish ack not received.");
             	rc = SUCCESS;
-  //      	}
+        	}
 			
 			if (rc == SUCCESS) { 
 				data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
@@ -428,7 +422,6 @@ void aws_iot_task(void *param) {
 
 			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 		}
-
 		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
 			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
 			eventPacket.payloadLen = strlen(ePayload);
@@ -563,6 +556,7 @@ void normal_tasks()
 	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
+	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
 	
  
     modem_event_group = xEventGroupCreate();
@@ -599,7 +593,6 @@ void normal_tasks()
 		}	
 	}
 
-
     ESP_ERROR_CHECK(dce->set_flow_ctrl(dce, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce->store_profile(dce));
     /* Print Module ID, Operator, IMEI, IMSI */
@@ -607,7 +600,6 @@ void normal_tasks()
     RAAHI_LOGI(TAG, "Operator: %s", dce->oper);
     RAAHI_LOGI(TAG, "IMEI: %s", dce->imei);
     RAAHI_LOGI(TAG, "IMSI: %s", dce->imsi);
-    
     /* Get signal quality */
     uint32_t rssi = 0, ber = 0;
     dce->get_signal_quality(dce, &rssi, &ber);
@@ -650,6 +642,5 @@ void normal_tasks()
 //    ESP_ERROR_CHECK(dce->deinit(dce));
 //    ESP_ERROR_CHECK(dte->deinit(dte));
 	user_mqtt_str = dce->imei;
-//    xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 5, NULL, 1);
 }
