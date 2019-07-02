@@ -163,14 +163,15 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 	
 	// Write modbus master command on rs485
     uart_write_bytes(DATA_SAMPLING_UART, (const char*)&data_out[0], 8);
+	vTaskDelay(1000 / portTICK_PERIOD_MS);
+	
 	for (count = 0; count <5; count++)
 	{
 		//Read data from UART
     	int len = uart_read_bytes(DATA_SAMPLING_UART, data_in, MODBUS_BUF_SIZE, PACKET_READ_TICS);
     
     	//Write data back to UART
-    	if ((len > 0) && (data_in[0] == data_out[0])) {
-        	RAAHI_LOGI(TAG, "Received %u bytes:", len);
+    	if ((len == 7) && (data_in[0] == data_out[0])) {
 			modbus_crc = usMBCRC16(data_in, len-2);
 			if(((uint8_t)(modbus_crc & 0xFF) == data_in[len-2]) && ((uint8_t)(modbus_crc >> 8) == data_in[len-1])) {
 				*result = data_in[len-4];
@@ -239,7 +240,7 @@ void modbus_sensor_task()
 				}
 				//xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
 				//xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
-        		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+				strcpy(data_json.packet[data_json.write_ptr], cPayload);
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
 				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
@@ -314,7 +315,6 @@ void data_sampling_task(void *param)
     	uart_set_mode(DATA_SAMPLING_UART, UART_MODE_RS485_HALF_DUPLEX);
 
 		modbus_sensor_task();
-
         RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 
 		uart_wait_tx_done(DATA_SAMPLING_UART, 500 / portTICK_RATE_MS);

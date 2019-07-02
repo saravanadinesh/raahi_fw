@@ -592,7 +592,7 @@ void app_main()
     
 
 	// Check the Config GPIO pin. 
-    if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 0) {
+    if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 1) {
 		ESP_LOGI(TAG, "Config Pin set. Going into OTA mode\n");
                 gpio_set_level(GPIO_STATUS_PIN_0,0);// Set Green LED 
                 gpio_set_level(GPIO_STATUS_PIN_1,1);

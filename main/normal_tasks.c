@@ -556,7 +556,7 @@ void normal_tasks()
 	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
-	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
+	xTaskCreate(data_sampling_task, "data_sampling_task", 8192, NULL, 10, NULL);	
 	
  
     modem_event_group = xEventGroupCreate();
@@ -642,5 +642,5 @@ void normal_tasks()
 //    ESP_ERROR_CHECK(dce->deinit(dce));
 //    ESP_ERROR_CHECK(dte->deinit(dte));
 	user_mqtt_str = dce->imei;
-    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 1);
 }
