@@ -29,7 +29,6 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 
-//#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "nvs.h"
@@ -39,8 +38,9 @@
 #include "esp_ota_ops.h"
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
+#include "esp_system.h"
 #include <esp_http_server.h>
-
+#include "raahi.h"
 #include "driver/gpio.h"
 
 // Defines
@@ -57,10 +57,8 @@ static const char *TAG = "raahi_main";
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 static char buf[POST_BUF_SIZE + 1] = { 0 };
-
 // Function declarations
 void normal_tasks(void);
-
 
 /********************************************************************/
 // Function Definitions
@@ -539,7 +537,6 @@ void wifi_init_softap()
 
 }
 
-
 /**************************************************************
 * Main function  
 *
@@ -558,7 +555,9 @@ void app_main()
 
     /* Initialize file storage */
     ESP_ERROR_CHECK(init_spiffs());
+
     init_config_gpio();
+
     //set tx gpio to 1
     gpio_set_level(GPIO_CONFIG_PIN_TX,1);
 	// Init WiFi soft AP

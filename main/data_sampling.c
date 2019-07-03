@@ -8,6 +8,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -15,15 +16,14 @@
 #include "soc/uart_struct.h"
 #include "driver/uart.h"
 #include "esp32/rom/gpio.h"
-
 #include "raahi.h"
+#include "esp_sntp.h"
 
 // MODBUS related Defines 
 #define MODBUS_TXD   (23)
 #define MODBUS_RXD   (22)
 #define MODBUS_RTS   (21)
 #define MODBUS_CTS  UART_PIN_NO_CHANGE
-
 // GPS receiver related Defines
 #define GPS_TASK_TXD   (18)
 #define GPS_TASK_RXD   (27)
@@ -33,6 +33,7 @@
 // Defines that are common to both MODBUS and GPS (They share the same UART)
 #define BUF_SIZE        (127)
 #define BAUD_RATE       (9600)
+#define GPGLL_LEN       (47)
 #define PACKET_READ_TICS        (100 / portTICK_RATE_MS)
 #define DATA_SAMPLING_UART      (UART_NUM_2)
 static const int RX_BUF_SIZE = 1024;
@@ -42,7 +43,6 @@ static const int RX_BUF_SIZE = 1024;
 /* Global variables */
 static const char *TAG = "data_sampling_task";
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
-
 
 static const uint8_t aucCRCHi[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
@@ -227,20 +227,20 @@ void modbus_sensor_task()
 			if(modbus_read_ret_val == ESP_OK) {	
 				if (user_mqtt_str != NULL) {
 					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
-							"user_id", user_mqtt_str, \
+							"deviceId", user_mqtt_str, \
 							"slave_id", sysconfig.slave_id[slave_id_idx], \
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
     			} else {
 					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
-							"user_id", "user_id_NA", \
+							"deviceId", "user_id_NA", \
 							"slave_id", sysconfig.slave_id[slave_id_idx], \
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
 				}
 				//xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
 				//xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
-        		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+        		        strcpy(data_json.packet[data_json.write_ptr], cPayload);
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
 				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
@@ -264,6 +264,21 @@ void modbus_sensor_task()
 
 } 
 
+
+void parse_gpgll(float *gps_lat,float *gps_lng, char *gpgll_line) {
+  char *ptr = gpgll_line;
+  *gps_lat = floor(strtof(gpgll_line+6,NULL)/100)+strtof(gpgll_line+8,NULL)/60;
+  *gps_lng = floor(strtof(gpgll_line+19,NULL)/100)+strtof(gpgll_line+22,NULL)/60;
+  if(gpgll_line[17] == 'S') {
+     *gps_lat = 0 - (*gps_lat); 
+  }
+  if(gpgll_line[31] == 'W') {
+     *gps_lng = 0 - (*gps_lng); 
+  }
+     
+
+}
+
 /* -----------------------------------------------------------
 | 	gps_sampling_task
 | 	Collects gps samples
@@ -272,21 +287,75 @@ void gps_sampling_task()
 {
 	//uart_write_bytes(DATA_SAMPLING_UART, "I am now in the gps task\r\n", strlen("I am now in the gps task\r\n"));
         static const char *RX_TASK_TAG = "GPS SAMPLING TASK";
+        time_t now;
         ESP_LOGI(RX_TASK_TAG, "Inside GPS sampling task");
         esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
+          
+        char cPayload[DATA_JSON_STR_SIZE];
         uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE+1);
         while (1) {
           const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
           if (rxBytes > 0) {
             data[rxBytes] = 0;
-            ESP_LOGI(RX_TASK_TAG, "Read %d bytes: '%s'", rxBytes, data);
-            ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+            bool valid = true;
+            char *ptr = strstr((char*)data, "GPGLL");
+	    if (ptr != NULL) /* Substring found */
+	    {
+                
+                //ESP_LOGI(RX_TASK_TAG, "Read %d bytes: '%s'", rxBytes, data);
+                char *gpgll_line, *gpgll_start;
+                gpgll_line = (char*) malloc(GPGLL_LEN+1);
+                gpgll_start=gpgll_line;
+                /*copy GPGLL line */
+                uint8_t cntr = 0 ; 
+                while ((ptr != NULL) && (*ptr != '*') && (cntr < 7)) {
+                   *gpgll_start = *ptr;
+                   if (*ptr == ',') {
+                     ++cntr;
+                   }
+                   ++gpgll_start, ++ptr;
+                }
+                *gpgll_start = '\0'; 
+                 ESP_LOGI(RX_TASK_TAG, "GPGLL line '%s': size: %d",gpgll_line,strlen(gpgll_line));
+                   char valid = gpgll_line[strlen(gpgll_line)-2];
+                   if (valid == 'V') {
+                    ESP_LOGI(RX_TASK_TAG, "GPGLL Void line '%s'",gpgll_line);
+                     free(gpgll_line);
+                     gpgll_start = NULL;
+                   } else if (valid == 'A') {
+                    ESP_LOGI(RX_TASK_TAG, "GPGLL Active line '%s'",gpgll_line);
+                    float gps_lat, gps_lng;
+                    parse_gpgll(&gps_lat, &gps_lng, gpgll_line); 
+                    time(&now);
+                    ESP_LOGI(RX_TASK_TAG, "GPGLL lat:'%.5f' lng:'%.5f'",gps_lat,gps_lng);
+                    if (user_mqtt_str != NULL) {
+                       sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+                                 "deviceId", user_mqtt_str, \
+                                 "timestamp", now, \
+                                 "lat", gps_lat, \
+                                 "lng", gps_lng);
+                    } else {
+                       sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+                                 "deviceId", "user_id_NA", \
+                                 "timestamp", now, \
+                                 "lat", gps_lat, \
+                                 "lng", gps_lng);
+                    }
+
+                    strcpy(data_json.packet[data_json.write_ptr], cPayload);
+                    data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
+                    /* parse line to extract location */
+                   }
+	    }
+            //ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+           /* TODO: put check if retries exhauseted or Location found then break*/ 
             break;
          }
        }
      free(data);
      return;
 }
+
 
 /* -----------------------------------------------------------
 | 	data_sampling_task
@@ -305,7 +374,6 @@ void data_sampling_task(void *param)
         .rx_flow_ctrl_thresh = 122,
     };
 
-
 	while(1) {
 
     	// Configure UART parameters for sampling on MODBUS
@@ -314,7 +382,7 @@ void data_sampling_task(void *param)
     	uart_driver_install(DATA_SAMPLING_UART, BUF_SIZE * 2, 0, 0, NULL, 0);
     	uart_set_mode(DATA_SAMPLING_UART, UART_MODE_RS485_HALF_DUPLEX);
 
-		modbus_sensor_task();
+	modbus_sensor_task();
 
         RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 

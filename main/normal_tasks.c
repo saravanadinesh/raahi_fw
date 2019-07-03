@@ -1,12 +1,9 @@
 /*
- * Copyright 2010-2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * Copyright 2018-2019
  * Additions Copyright 2016 Espressif Systems (Shanghai) PTE LTD
  *
  * Licensed under the Apache License, Version 2.0 (the "License").
  * You may not use this file except in compliance with the License.
- * A copy of the License is located at
- *
- *  http://aws.amazon.com/apache2.0
  *
  * or in the "license" file accompanying this file. This file is distributed
  * on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
@@ -14,11 +11,11 @@
  * permissions and limitations under the License.
  */
 /**
- * @file subscribe_publish_sample.c
- * @brief simple MQTT publish and subscribe on the same topic
+ * @file normal_tasks.c
+ * @brief Raahi normal task
  *
  * This example takes the parameters from the build configuration and establishes a connection to the AWS IoT MQTT Platform.
- * It subscribes and publishes to the same topic - "test_topic/esp32"
+ * It subscribes and publishes to the same topic - /raahi/data and /raahi/event"
  *
  * Some setup is required. See example README for details.
  *
@@ -42,7 +39,7 @@
 #include "sim800.h"
 #include "soc/uart_struct.h"
 #include <esp_http_server.h>
-
+#include "esp_sntp.h"
 #include "raahi.h"
 #define GPIO_STATUS_PIN_0 32 // TODO: Move this to sdkconfig
 #define GPIO_STATUS_PIN_1 25 // TODO: Move this to sdkconfig
@@ -68,15 +65,16 @@ httpd_handle_t start_webserver(void);
 void data_sampling_task(void*);
 
 static EventGroupHandle_t modem_event_group = NULL;
+static EventGroupHandle_t esp_event_group = NULL;
 //EventGroupHandle_t mqtt_rw_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
+static const int SNTP_CONNECT_BIT = BIT0;
 //const int READ_OP_DONE = BIT0;
 //const int WRITE_OP_DONE = BIT1;
 
 static const char *TAG = "normal_task";
-
 
 char *user_mqtt_str;
 
@@ -139,6 +137,70 @@ struct debug_data_struct debug_data;
  */
 
 uint32_t port = AWS_IOT_MQTT_PORT;
+static void obtain_time(void);
+static void initialize_sntp(void);
+
+
+
+void time_sync_notification_cb(struct timeval *tv)
+{
+    ESP_LOGI(TAG, "Notification of a time synchronization event");
+}
+
+
+static void obtain_time(void)
+{
+    //ESP_ERROR_CHECK( nvs_flash_init() );
+    //tcpip_adapter_init();
+    //ESP_ERROR_CHECK( esp_event_loop_create_default() );
+
+    initialize_sntp();
+
+    // wait for time to be set
+    time_t now = 0;
+    struct tm timeinfo = { 0 };
+    int retry = 0;
+    const int retry_count = 30;
+    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
+        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    }
+    time(&now);
+    localtime_r(&now, &timeinfo);
+}
+
+static void initialize_sntp(void)
+{
+    ESP_LOGI(TAG, "Initializing SNTP");
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    sntp_set_time_sync_notification_cb(time_sync_notification_cb);
+    sntp_init();
+}
+
+static void setup_sntp(void)
+{
+  time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    // Is time set? If not, tm_year will be (1970 - 1900).
+    if (timeinfo.tm_year < (2016 - 1900)) {
+        ESP_LOGI(TAG, "Time is not set yet. Connecting to GPRS and getting time over NTP.");
+        obtain_time();
+        // update 'now' variable with current time
+        time(&now);
+    }
+    char strftime_buf[64];
+    // Set timezone to Eastern Standard Time and print local time
+    setenv("TZ", "IST-5:30", 1);
+    tzset();
+    localtime_r(&now, &timeinfo);
+    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+    ESP_LOGI(TAG, "The current date/time in India is: %s", strftime_buf);
+    xEventGroupSetBits(esp_event_group, SNTP_CONNECT_BIT);
+}
+
 
 void compose_mqtt_event(const char *TAG, char *msg)
 {
@@ -405,36 +467,36 @@ void aws_iot_task(void *param) {
         RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 				
 		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
-			//xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-			//xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
-   			
-			strcpy(dPayload, data_json.packet[data_json.read_ptr]);     	
-			dataPacket.payloadLen = strlen(dPayload);
-        	rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
-        	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	RAAHI_LOGW(TAG, "publish ack not received.");
-            	rc = SUCCESS;
-        	}
+		    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+		    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
+                    RAAHI_LOGI(TAG, "Attempting data publish");
+		    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
+                    time_t now;
+                    time(&now);
+		    dataPacket.payloadLen = strlen(dPayload);
+        	    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
+        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	        RAAHI_LOGW(TAG, "publish ack not received.");
+            	        rc = SUCCESS;
+        	    }
 			
-			if (rc == SUCCESS) { 
-				data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
-			}
-
+		    if (rc == SUCCESS) { 
+		        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
+		    }
 			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 		}
 		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
 			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
 			eventPacket.payloadLen = strlen(ePayload);
-        	rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
-        	if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	RAAHI_LOGW(TAG, "publish ack not received.");
-            	rc = SUCCESS;
-        	}
+        	    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
+        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	        RAAHI_LOGW(TAG, "publish ack not received.");
+            	        rc = SUCCESS;
+        	    }
 			
-			if (rc == SUCCESS) { 
-				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
-			}
-
+		    if (rc == SUCCESS) { 
+			event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+        	    }
 		}
 	
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
@@ -556,10 +618,11 @@ void normal_tasks()
 	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
-	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 10, NULL);	
+	xTaskCreate(data_sampling_task, "data_sampling_task", 4096, NULL, 9, NULL);	
 	
  
     modem_event_group = xEventGroupCreate();
+    esp_event_group = xEventGroupCreate();
     /* create dte object */
     esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();
 
@@ -641,6 +704,10 @@ void normal_tasks()
 //    RAAHI_LOGI(TAG, "Power down");
 //    ESP_ERROR_CHECK(dce->deinit(dce));
 //    ESP_ERROR_CHECK(dte->deinit(dte));
-	user_mqtt_str = dce->imei;
+
+    /* Start NTP sync */
+    setup_sntp();
+    xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    user_mqtt_str = dce->imei;
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 5, NULL, 1);
 }
