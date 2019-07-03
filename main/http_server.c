@@ -89,17 +89,24 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
     extern const unsigned char infopage_end[]   asm("_binary_info_html_end");
     const size_t infopage_size = (infopage_end - infopage_start);
 	uint8_t slave_id_idx, reg_address_idx;
-	char tempStr[MODEM_MAX_OPERATOR_LENGTH] = {'\0'};
+	char tempStr[200] = {'\0'};
 	
 	//httpd_resp_set_type(req, "text/html"); 
     httpd_resp_send_chunk(req, (const char *)infopage_start, infopage_size);
-	sprintf(tempStr, "<tr><td>IMEI</td><td>%s</td></tr>\n", debug_data.imei); 
+	
+	sprintf(tempStr, "\t\t<tr><td>IMEI</td><td>%s</td></tr>\n", debug_data.imei); 
 	httpd_resp_sendstr_chunk(req, tempStr);
-	sprintf(tempStr, "<tr><td>Operator</td><td>%s</td></tr>\n", debug_data.oper);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>Operator</td><td>%s</td></tr>\n", debug_data.oper);
 	httpd_resp_sendstr_chunk(req, tempStr);
-	sprintf(tempStr, "<tr><td>RSSI</td><td>%u</td></tr>\n", debug_data.rssi);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>RSSI</td><td>%u</td></tr>\n", debug_data.rssi);
 	httpd_resp_sendstr_chunk(req, tempStr);
-	sprintf(tempStr, "<tr><td>BER</td><td>%u</td></tr>\n", debug_data.ber);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>BER</td><td>%u</td></tr>\n", debug_data.ber);
 	httpd_resp_sendstr_chunk(req, tempStr);
 	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
@@ -114,13 +121,14 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 				break;
 			}
 	
-			sprintf(tempStr, "<tr><td>Slave %u, Reg %u</td><td>0x%.4X</td></tr>\n", (slave_id_idx+1), sysconfig.reg_address[reg_address_idx], debug_data.slave_info[slave_id_idx].data[reg_address_idx]);
-	
+			tempStr[0] = '\0';
+			sprintf(tempStr, "\t\t<tr><td>Slave %u, Reg %u</td><td>0x%.4X</td></tr>\n", (slave_id_idx+1), sysconfig.reg_address[reg_address_idx], debug_data.slave_info[slave_id_idx].data[reg_address_idx]);
+			httpd_resp_sendstr_chunk(req, tempStr);
 		}
 	}
 
-	httpd_resp_sendstr_chunk(req, "</tbody>\n");
-	httpd_resp_sendstr_chunk(req, "</table>\n");
+	httpd_resp_sendstr_chunk(req, "\t</tbody>\n");
+	httpd_resp_sendstr_chunk(req, "\t</table>\n");
 	httpd_resp_sendstr_chunk(req, "</body>\n");
 	httpd_resp_sendstr_chunk(req, "</html>\n");
 	

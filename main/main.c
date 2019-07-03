@@ -544,7 +544,8 @@ void wifi_init_softap()
 void app_main()
 {
 	// TODO: Display current firmware version
-	
+	init_config_gpio();
+
 	// Initialize NVS.
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -590,9 +591,9 @@ void app_main()
     
 
 	// Check the Config GPIO pin. 
-    if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 0) {
+    if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 1) {
 		ESP_LOGI(TAG, "Config Pin set. Going into OTA mode\n");
-                gpio_set_level(GPIO_STATUS_PIN_0,0);/* Set Green LED */
+                gpio_set_level(GPIO_STATUS_PIN_0,0);// Set Green LED 
                 gpio_set_level(GPIO_STATUS_PIN_1,1);
                 gpio_set_level(GPIO_STATUS_PIN_2,1);
 		ota_task();
