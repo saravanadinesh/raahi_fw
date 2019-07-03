@@ -102,7 +102,7 @@ extern const int WRITE_OP_DONE;
 extern struct data_json_struct data_json;
 extern struct event_json_struct event_json;
 extern struct debug_data_struct debug_data;
-extern char *user_mqtt_str;
+extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
 
 
 /********************************************************************/
@@ -182,9 +182,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 				RAAHI_LOGI(TAG, "Modbus CRC Error occurred. Expected: 0x%.4X,\t Got:0x%.2X%.2X", modbus_crc, data_in[len-2], data_in[len-1]);
 				return_val = ESP_ERR_INVALID_RESPONSE;
 				break;
-    	} else {
-			printf("Waiting for slave to respond \n");
-		}
+    	} 
 
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 	} // end of for count..
@@ -210,6 +208,7 @@ void modbus_sensor_task()
     char cPayload[DATA_JSON_STR_SIZE];
 	uint8_t slave_id_idx, reg_address_idx;
 	esp_err_t modbus_read_ret_val;
+	time_t now;
 
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
@@ -225,15 +224,18 @@ void modbus_sensor_task()
 
 			modbus_read_ret_val = modbus_read(sysconfig.slave_id[slave_id_idx], sysconfig.reg_address[reg_address_idx], &modbus_read_result);
 			if(modbus_read_ret_val == ESP_OK) {	
+        	   	time(&now);
 				if (user_mqtt_str != NULL) {
-					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
+					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %d, \"%s\": %u, \"%s\": %u}", \
 							"deviceId", user_mqtt_str, \
+        	                "timestamp", now, \
 							"slave_id", sysconfig.slave_id[slave_id_idx], \
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
     			} else {
-					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\" : %d, \"%s\" : 0x%.4X, \"%s\" : 0x%.4X}", \
+					sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %d, \"%s\": %u, \"%s\": %u}", \
 							"deviceId", "user_id_NA", \
+        	                "timestamp", now, \
 							"slave_id", sysconfig.slave_id[slave_id_idx], \
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
@@ -244,7 +246,7 @@ void modbus_sensor_task()
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
 				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
-				RAAHI_LOGI(TAG, "Json Message: %s", cPayload);
+				ESP_LOGI(TAG, "Json: %s", cPayload);
 
 				// Updata debug data
 				debug_data.slave_info[slave_id_idx].status = CONNECTED_AND_UPDATING;
@@ -286,74 +288,76 @@ void parse_gpgll(float *gps_lat,float *gps_lng, char *gpgll_line) {
 void gps_sampling_task()
 {
 	//uart_write_bytes(DATA_SAMPLING_UART, "I am now in the gps task\r\n", strlen("I am now in the gps task\r\n"));
-        static const char *RX_TASK_TAG = "GPS SAMPLING TASK";
-        time_t now;
-        ESP_LOGI(RX_TASK_TAG, "Inside GPS sampling task");
-        esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
-          
-        char cPayload[DATA_JSON_STR_SIZE];
-        uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE+1);
-        while (1) {
-          const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
-          if (rxBytes > 0) {
-            data[rxBytes] = 0;
-            bool valid = true;
-            char *ptr = strstr((char*)data, "GPGLL");
-	    if (ptr != NULL) /* Substring found */
-	    {
-                
-                //ESP_LOGI(RX_TASK_TAG, "Read %d bytes: '%s'", rxBytes, data);
-                char *gpgll_line, *gpgll_start;
-                gpgll_line = (char*) malloc(GPGLL_LEN+1);
-                gpgll_start=gpgll_line;
-                /*copy GPGLL line */
-                uint8_t cntr = 0 ; 
-                while ((ptr != NULL) && (*ptr != '*') && (cntr < 7)) {
-                   *gpgll_start = *ptr;
-                   if (*ptr == ',') {
-                     ++cntr;
-                   }
-                   ++gpgll_start, ++ptr;
-                }
-                *gpgll_start = '\0'; 
-                 ESP_LOGI(RX_TASK_TAG, "GPGLL line '%s': size: %d",gpgll_line,strlen(gpgll_line));
-                   char valid = gpgll_line[strlen(gpgll_line)-2];
-                   if (valid == 'V') {
-                    ESP_LOGI(RX_TASK_TAG, "GPGLL Void line '%s'",gpgll_line);
-                     free(gpgll_line);
-                     gpgll_start = NULL;
-                   } else if (valid == 'A') {
-                    ESP_LOGI(RX_TASK_TAG, "GPGLL Active line '%s'",gpgll_line);
-                    float gps_lat, gps_lng;
-                    parse_gpgll(&gps_lat, &gps_lng, gpgll_line); 
-                    time(&now);
-                    ESP_LOGI(RX_TASK_TAG, "GPGLL lat:'%.5f' lng:'%.5f'",gps_lat,gps_lng);
-                    if (user_mqtt_str != NULL) {
-                       sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
-                                 "deviceId", user_mqtt_str, \
-                                 "timestamp", now, \
-                                 "lat", gps_lat, \
-                                 "lng", gps_lng);
-                    } else {
-                       sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
-                                 "deviceId", "user_id_NA", \
-                                 "timestamp", now, \
-                                 "lat", gps_lat, \
-                                 "lng", gps_lng);
-                    }
+	static const char *RX_TASK_TAG = "GPS SAMPLING TASK";
+    time_t now;
+    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
+	uint8_t count;
+      
+    char cPayload[DATA_JSON_STR_SIZE];
+    uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE+1);
+    
+	for (count = 0; count <5; count++)
+	{
+    	const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
+    	if (rxBytes > 0) {
+			data[rxBytes] = 0;
+    		bool valid = true;
+    		char *ptr = strstr((char*)data, "GPGLL");
+	    	if (ptr != NULL) /* Substring found */
+	    	{
+        		char *gpgll_line, *gpgll_start;
+        		gpgll_line = (char*) malloc(GPGLL_LEN+1);
+        		gpgll_start=gpgll_line;
+        		/*copy GPGLL line */
+        		uint8_t cntr = 0 ; 
+        		while ((ptr != NULL) && (*ptr != '*') && (cntr < 7)) {
+        		   *gpgll_start = *ptr;
+        		   if (*ptr == ',') {
+        		     ++cntr;
+        		   }
+        		   ++gpgll_start, ++ptr;
+        		}
+				*gpgll_start = '\0'; 
+        		ESP_LOGI(RX_TASK_TAG, "GPGLL line '%s': size: %d",gpgll_line,strlen(gpgll_line));
+        	  	char valid = gpgll_line[strlen(gpgll_line)-2];
+        	  	if (valid == 'V') {
+        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Void line '%s'",gpgll_line);
+        	    	free(gpgll_line);
+        	    	gpgll_start = NULL;
+        	  	} else if (valid == 'A') {
+        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Active line '%s'",gpgll_line);
+        	   		float gps_lat, gps_lng;
+        	   		parse_gpgll(&gps_lat, &gps_lng, gpgll_line); 
+        	   		time(&now);
+        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL lat:'%.5f' lng:'%.5f'",gps_lat,gps_lng);
+        	   		if (user_mqtt_str != NULL) {
+        	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+        	                "deviceId", user_mqtt_str, \
+        	                "timestamp", now, \
+        	                "lat", gps_lat, \
+        	                "lng", gps_lng);
+        	   		} else {
+        	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+        	                "deviceId", "user_id_NA", \
+        	                "timestamp", now, \
+        	                "lat", gps_lat, \
+        	                "lng", gps_lng);
+        	   		}
 
-                    strcpy(data_json.packet[data_json.write_ptr], cPayload);
-                    data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
-                    /* parse line to extract location */
-                   }
-	    }
-            //ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
-           /* TODO: put check if retries exhauseted or Location found then break*/ 
-            break;
-         }
-       }
-     free(data);
-     return;
+        	   		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+        	   		data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
+        	   		/* parse line to extract location */
+        	  	}
+				break;
+	    	} // End of if (ptr != NULL)
+		} // End of if (rxBytes > 0) 
+		
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+	} // end of for loop
+
+    free(data);
+    return;
 }
 
 
@@ -382,8 +386,7 @@ void data_sampling_task(void *param)
     	uart_driver_install(DATA_SAMPLING_UART, BUF_SIZE * 2, 0, 0, NULL, 0);
     	uart_set_mode(DATA_SAMPLING_UART, UART_MODE_RS485_HALF_DUPLEX);
 
-	modbus_sensor_task();
-        RAAHI_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
+		modbus_sensor_task();
 
 		uart_wait_tx_done(DATA_SAMPLING_UART, 500 / portTICK_RATE_MS);
 		if (uart_driver_delete(DATA_SAMPLING_UART) == ESP_OK) { //End modbus related activity so that uart can be reused for GPS
@@ -403,7 +406,7 @@ void data_sampling_task(void *param)
 			uart_flush_input(DATA_SAMPLING_UART);
 			
 			if(uart_driver_delete(DATA_SAMPLING_UART) != ESP_OK) {
-				RAAHI_LOGE(TAG, "UART driver couldn't be deletedi to carry out sensor task");
+				RAAHI_LOGE(TAG, "UART driver couldn't be deleted to carry out sensor task");
 				abort();
 			}
        		gpio_matrix_out(GPS_TASK_TXD, 0X100, 0, 0);

@@ -10,10 +10,11 @@
 #define MAX_APN_LEN 20
 #define MAX_MODBUS_SLAVES 2
 #define MAX_MODBUS_REGISTERS 3
+#define MAX_DEVICE_ID_LEN 20
 #define DATA_JSON_QUEUE_SIZE 10
-#define DATA_JSON_STR_SIZE 100
+#define DATA_JSON_STR_SIZE 250
 #define EVENT_JSON_QUEUE_SIZE 10
-#define EVENT_JSON_STR_SIZE 200
+#define EVENT_JSON_STR_SIZE 250
 
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
