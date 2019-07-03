@@ -397,7 +397,7 @@ void data_sampling_task(void *param)
 			uart_set_mode(DATA_SAMPLING_UART, UART_MODE_UART);
 			uart_flush_input(DATA_SAMPLING_UART);
     		
-			//gps_sampling_task();
+			gps_sampling_task();
 			
 			uart_wait_tx_done(DATA_SAMPLING_UART, 500 / portTICK_RATE_MS);
 			uart_flush_input(DATA_SAMPLING_UART);
