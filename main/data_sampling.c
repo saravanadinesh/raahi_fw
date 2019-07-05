@@ -369,6 +369,14 @@ void gps_sampling_task()
 void data_sampling_task(void *param)
 {
     
+  	time_t now;
+    struct tm timeinfo;
+	int today;
+
+	time(&now);
+    localtime_r(&now, &timeinfo);
+	today = timeinfo.tm_mday;
+
 	uart_config_t uart_config = {
         .baud_rate = BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -415,7 +423,16 @@ void data_sampling_task(void *param)
 		}
 
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
-		
+	
+		// We should restart every 1 day to make sure the code isn't stuck in some place forever
+		time(&now);
+    	localtime_r(&now, &timeinfo);
+		if (timeinfo.tm_mday != today) {
+			today = timeinfo.tm_mday;
+			RAAHI_LOGI(TAG, "Restarting in 10 sec since 24hrs have passed");
+			abort();
+		}
+	
 	}// End of infinite while loop		
   	
 }

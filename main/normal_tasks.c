@@ -168,6 +168,11 @@ static void obtain_time(void)
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
+	if (retry == 30) {
+		ESP_LOGI(TAG, "SNTP time could not be obtained");
+		abort(); // If 
+	}
+
     time(&now);
     localtime_r(&now, &timeinfo);
 }
@@ -329,7 +334,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
         xEventGroupSetBits(modem_event_group, STOP_BIT);
         break;
     case MODEM_EVENT_UNKNOWN:
-        ESP_LOGW(TAG, "Unknown line received: %s", (char *)event_data);
+        ESP_LOGW(TAG, "Unknown line received"); //: %s", (char *)event_data);
         break;
     default:
         break;
@@ -486,44 +491,44 @@ void aws_iot_task(void *param) {
 			ESP_LOGI(TAG, "MQTT yeild wasn't successful");
 		}
 	
+		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
+		    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+		    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
+		    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
+		    dataPacket.payloadLen = strlen(dPayload);
+        	    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
+        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	        ESP_LOGW(TAG, "publish ack not received.");
+            	        rc = SUCCESS;
+        	    }
+			
+		    if (rc == SUCCESS) { 
+		        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
+		    }
+			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+		}
+		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
+			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
+			eventPacket.payloadLen = strlen(ePayload);
+        	    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
+        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	        ESP_LOGW(TAG, "publish ack not received.");
+            	        rc = SUCCESS;
+        	    }
+			
+		    if (rc == SUCCESS) { 
+				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+        	}
+		}
+
 		switch(rc)
 		{
 			case SUCCESS:
         	case NETWORK_RECONNECTED:		
 			case NETWORK_PHYSICAL_LAYER_CONNECTED:
-
+				failures_counter = 0;
+				other_failures_counter = 0;	
         		//ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
-				
-				if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
-				    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-				    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
-				    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
-				    dataPacket.payloadLen = strlen(dPayload);
-        			    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
-        			    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-        		    	        ESP_LOGW(TAG, "publish ack not received.");
-        		    	        rc = SUCCESS;
-        			    }
-					
-				    if (rc == SUCCESS) { 
-				        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
-				    }
-					//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
-				}
-				if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
-					strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
-					eventPacket.payloadLen = strlen(ePayload);
-        			    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
-        			    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-        		    	        ESP_LOGW(TAG, "publish ack not received.");
-        		    	        rc = SUCCESS;
-        			    }
-					
-				    if (rc == SUCCESS) { 
-						event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
-        			}
-				}
-	
         		vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 				break; // End of case SUCCESS: ...
 	
@@ -531,26 +536,6 @@ void aws_iot_task(void *param) {
 				vTaskDelay(1000/portTICK_RATE_MS); // Wait a sec and go back to loop
 				// TODO: There is no way to simply check the status of aws_iot. If it is available in the future, add it here
 				rc = SUCCESS; // Due the reason mentioned in the above line, this is necessary. Otherwise we will keep hitting this case statement	
-				break;
-
-			case NETWORK_MANUALLY_DISCONNECTED:
-			case NETWORK_DISCONNECTED_ERROR:
-	        case NETWORK_PHYSICAL_LAYER_DISCONNECTED:
-				// Restart modem 
-    			if(esp_modem_exit_ppp(dte_g) == ESP_FAIL) {
-					ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
-					abort();
-				}
-				ESP_ERROR_CHECK(dce_g->power_down(dce_g));
-				ESP_ERROR_CHECK(dce_g->deinit(dce_g));
-				ESP_ERROR_CHECK(dte_g->deinit(dte_g));
-				
-				vTaskDelay(1000/portTICK_RATE_MS);
-
-				mobile_radio_init();
-				failures_counter = 0;
-				other_failures_counter = 0;	
-				rc = SUCCESS;
 				break;
 
 			case FAILURE:
@@ -573,7 +558,7 @@ void aws_iot_task(void *param) {
 				other_failures_counter++;
 				RAAHI_LOGE(TAG, "General failure occurred. rc = %d", rc);
 				if (other_failures_counter > MAX_AWS_FAILURE_COUNT) { 
-    				ESP_LOGE(TAG, "Too many iother failures in AWS loop. Last rc = %d", rc);
+    				ESP_LOGE(TAG, "Too many other failures in AWS loop. Last rc = %d", rc);
 					abort();
 				}
 				vTaskDelay(1000/portTICK_RATE_MS);
