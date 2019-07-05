@@ -318,6 +318,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 			ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
 			abort();
 		}
+		ESP_ERROR_CHECK(dce_g->power_down(dce_g));
 		ESP_ERROR_CHECK(dce_g->deinit(dce_g));
 		ESP_ERROR_CHECK(dte_g->deinit(dte_g));
 		vTaskDelay(1000/portTICK_RATE_MS);
@@ -540,7 +541,7 @@ void aws_iot_task(void *param) {
 					ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
 					abort();
 				}
-				//ESP_ERROR_CHECK(dce_g->power_down(dce_g));
+				ESP_ERROR_CHECK(dce_g->power_down(dce_g));
 				ESP_ERROR_CHECK(dce_g->deinit(dce_g));
 				ESP_ERROR_CHECK(dte_g->deinit(dte_g));
 				
