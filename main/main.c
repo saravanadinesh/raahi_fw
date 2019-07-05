@@ -57,6 +57,7 @@ static const char *TAG = "raahi_main";
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 static char buf[POST_BUF_SIZE + 1] = { 0 };
+extern struct debug_data_struct debug_data;
 // Function declarations
 void normal_tasks(void);
 
@@ -588,7 +589,7 @@ void app_main()
     if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
         ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
     }
-    
+    strcpy(debug_data.fw_ver, running_app_info.version);
 
 	// Check the Config GPIO pin. 
     if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 1) {

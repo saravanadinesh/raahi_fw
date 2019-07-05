@@ -15,6 +15,7 @@
 #define DATA_JSON_STR_SIZE 250
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 250
+#define MAX_AWS_FAILURE_COUNT 10
 
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
@@ -92,10 +93,12 @@ struct slave_info_struct {
 	uint16_t data[MAX_MODBUS_REGISTERS]; 
 };
 struct debug_data_struct {
+	char fw_ver[5];
     char imei[MODEM_IMEI_LENGTH + 1]; 	
  	char oper[MODEM_MAX_OPERATOR_LENGTH];
 	uint32_t rssi;
 	uint32_t ber;
+	uint32_t battery_voltage;
 	struct slave_info_struct slave_info[MAX_MODBUS_SLAVES];
 };
 #endif //#ifndef _RAAHI_FW_H_

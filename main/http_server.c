@@ -23,6 +23,7 @@ static const char *TAG = "http_server";
 extern struct config_struct sysconfig;
 extern struct debug_data_struct debug_data;
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
+extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
 
 // Function declarations
 void display_sysconfig();
@@ -89,11 +90,20 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
     extern const unsigned char infopage_end[]   asm("_binary_info_html_end");
     const size_t infopage_size = (infopage_end - infopage_start);
 	uint8_t slave_id_idx, reg_address_idx;
-	char tempStr[200] = {'\0'};
+	char tempStr[200];
 	
 	//httpd_resp_set_type(req, "text/html"); 
     httpd_resp_send_chunk(req, (const char *)infopage_start, infopage_size);
 	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>FW Ver</td><td>%s</td></tr>\n", debug_data.fw_ver); 
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>MAC</td><td>%s</td></tr>\n", user_mqtt_str); 
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
+	tempStr[0] = '\0';
 	sprintf(tempStr, "\t\t<tr><td>IMEI</td><td>%s</td></tr>\n", debug_data.imei); 
 	httpd_resp_sendstr_chunk(req, tempStr);
 	
@@ -107,6 +117,10 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 	
 	tempStr[0] = '\0';
 	sprintf(tempStr, "\t\t<tr><td>BER</td><td>%u</td></tr>\n", debug_data.ber);
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>Battery Voltage</td><td>%u</td></tr>\n", debug_data.battery_voltage);
 	httpd_resp_sendstr_chunk(req, tempStr);
 	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)

@@ -63,6 +63,7 @@ char raahi_log_str[EVENT_JSON_STR_SIZE];
 // Function declarations
 httpd_handle_t start_webserver(void);
 void data_sampling_task(void*);
+void mobile_radio_init(void);
 
 static EventGroupHandle_t modem_event_group = NULL;
 static EventGroupHandle_t esp_event_group = NULL;
@@ -75,6 +76,8 @@ static const int SNTP_CONNECT_BIT = BIT0;
 //const int WRITE_OP_DONE = BIT1;
 
 static const char *TAG = "normal_task";
+static modem_dte_t *dte_g;
+static modem_dce_t *dce_g;
 
 char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 
@@ -180,7 +183,7 @@ static void initialize_sntp(void)
 
 static void setup_sntp(void)
 {
-  time_t now;
+  	time_t now;
     struct tm timeinfo;
     time(&now);
     localtime_r(&now, &timeinfo);
@@ -310,7 +313,15 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
         break;
     case MODEM_EVENT_PPP_DISCONNECT:
         ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
-        esp_restart(); 
+		// Restart modem
+    	if(esp_modem_exit_ppp(dte_g) == ESP_FAIL) {
+			ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
+			abort();
+		}
+		ESP_ERROR_CHECK(dce_g->deinit(dce_g));
+		ESP_ERROR_CHECK(dte_g->deinit(dte_g));
+		vTaskDelay(1000/portTICK_RATE_MS);
+		mobile_radio_init();
         break;
     case MODEM_EVENT_PPP_STOP:
         ESP_LOGI(TAG, "Modem PPP Stopped");
@@ -375,7 +386,7 @@ void aws_iot_task(void *param) {
 	IoT_Publish_Message_Params dataPacket;
 	IoT_Publish_Message_Params eventPacket;
 
-    IoT_Error_t rc = FAILURE;
+    IoT_Error_t rc, yield_rc = FAILURE;
 
     AWS_IoT_Client client;
     IoT_Client_Init_Params mqttInitParams = iotClientInitParamsDefault;
@@ -455,7 +466,7 @@ void aws_iot_task(void *param) {
         abort();
     }
 	RAAHI_LOGI(TAG, "Subscribed to %s", topic);
-
+	RAAHI_LOGI(TAG, "FW Version: %s", debug_data.fw_ver);
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
     dataPacket.qos = QOS0;
     dataPacket.payload = (void *) dPayload;
@@ -464,49 +475,114 @@ void aws_iot_task(void *param) {
     eventPacket.qos = QOS0;
     eventPacket.payload = (void *) ePayload;
     eventPacket.isRetained = 0;
-    while(rc >=0) {
 
-        //Max time the yield function will wait for read messages
-        rc = aws_iot_mqtt_yield(&client, 100);
+	rc = SUCCESS;
+	uint8_t failures_counter = 0, other_failures_counter = 0;
+    while(1) { 
+		//Max time the yield function will wait for read messages
+        yield_rc = aws_iot_mqtt_yield(&client, 100);
+		if (SUCCESS != yield_rc) {
+			ESP_LOGI(TAG, "MQTT yeild wasn't successful");
+		}
+	
+		switch(rc)
+		{
+			case SUCCESS:
+        	case NETWORK_RECONNECTED:		
+			case NETWORK_PHYSICAL_LAYER_CONNECTED:
 
-        //ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        		//ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
 				
-		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
-		    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-		    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
-		    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
-		    dataPacket.payloadLen = strlen(dPayload);
-        	    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
-        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	        ESP_LOGW(TAG, "publish ack not received.");
-            	        rc = SUCCESS;
-        	    }
-			
-		    if (rc == SUCCESS) { 
-		        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
-		    }
-			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
-		}
-		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
-			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
-			eventPacket.payloadLen = strlen(ePayload);
-        	    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
-        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
-            	        ESP_LOGW(TAG, "publish ack not received.");
-            	        rc = SUCCESS;
-        	    }
-			
-		    if (rc == SUCCESS) { 
-			event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
-        	}
-		}
+				if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
+				    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
+				    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
+				    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
+				    dataPacket.payloadLen = strlen(dPayload);
+        			    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
+        			    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+        		    	        ESP_LOGW(TAG, "publish ack not received.");
+        		    	        rc = SUCCESS;
+        			    }
+					
+				    if (rc == SUCCESS) { 
+				        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
+				    }
+					//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
+				}
+				if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
+					strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
+					eventPacket.payloadLen = strlen(ePayload);
+        			    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
+        			    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+        		    	        ESP_LOGW(TAG, "publish ack not received.");
+        		    	        rc = SUCCESS;
+        			    }
+					
+				    if (rc == SUCCESS) { 
+						event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+        			}
+				}
 	
-        vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
+        		vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
+				break; // End of case SUCCESS: ...
 	
-    }
+			case NETWORK_ATTEMPTING_RECONNECT:
+				vTaskDelay(1000/portTICK_RATE_MS); // Wait a sec and go back to loop
+				// TODO: There is no way to simply check the status of aws_iot. If it is available in the future, add it here
+				rc = SUCCESS; // Due the reason mentioned in the above line, this is necessary. Otherwise we will keep hitting this case statement	
+				break;
 
-    RAAHI_LOGE(TAG, "An error occurred in the main loop.");
-    abort();
+			case NETWORK_MANUALLY_DISCONNECTED:
+			case NETWORK_DISCONNECTED_ERROR:
+	        case NETWORK_PHYSICAL_LAYER_DISCONNECTED:
+				// Restart modem 
+    			if(esp_modem_exit_ppp(dte_g) == ESP_FAIL) {
+					ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
+					abort();
+				}
+				//ESP_ERROR_CHECK(dce_g->power_down(dce_g));
+				ESP_ERROR_CHECK(dce_g->deinit(dce_g));
+				ESP_ERROR_CHECK(dte_g->deinit(dte_g));
+				
+				vTaskDelay(1000/portTICK_RATE_MS);
+
+				mobile_radio_init();
+				failures_counter = 0;
+				other_failures_counter = 0;	
+				rc = SUCCESS;
+				break;
+
+			case FAILURE:
+				failures_counter++;
+				if (failures_counter > MAX_AWS_FAILURE_COUNT) {
+    				ESP_LOGE(TAG, "Too many failures in AWS loop. rc = %d", rc);
+					abort();
+				}
+				vTaskDelay(1000/portTICK_RATE_MS);
+				rc = SUCCESS;
+				break;
+
+			case TCP_SETUP_ERROR:
+			case TCP_CONNECTION_ERROR:
+			case NULL_VALUE_ERROR:
+    			ESP_LOGE(TAG, "Unrecoverable error in AWS loop. rc = %d", rc);
+    			abort();
+
+			default:
+				other_failures_counter++;
+				RAAHI_LOGE(TAG, "General failure occurred. rc = %d", rc);
+				if (other_failures_counter > MAX_AWS_FAILURE_COUNT) { 
+    				ESP_LOGE(TAG, "Too many iother failures in AWS loop. Last rc = %d", rc);
+					abort();
+				}
+				vTaskDelay(1000/portTICK_RATE_MS);
+				rc = SUCCESS;
+				break;
+
+		} // End of switch statement 
+	
+    } // End of infinite while loop
+
 }
 
 
@@ -607,17 +683,102 @@ void getMacAddress(char* macAddress) {
 	ESP_LOGI(TAG, "mac address is %s", macAddress);
 }
 
+void mobile_radio_init()
+{
+	uint8_t retries; 
+   
+	dte_g = NULL;
+	dce_g = NULL;
+ 
+	/* create dte object */
+    esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();
+
+	retries = 0;
+	while((dte_g = esp_modem_dte_init(&config)) == NULL)
+	{
+		vTaskDelay(10000 / portTICK_PERIOD_MS);
+	    retries++;
+		if (retries > 30) {
+			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
+			abort();
+		}	
+	}
+
+    /* Register event handler */
+    ESP_ERROR_CHECK(esp_modem_add_event_handler(dte_g, modem_event_handler, NULL));
+    /* create dce object */
+
+	retries = 0;
+    /* Wait for 2 secs for Modem info to populate*/ 
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+	while ((dce_g = sim800_init(dte_g)) == NULL) 
+	{
+		vTaskDelay(10000 / portTICK_PERIOD_MS);
+	    retries++;
+		if (retries > 30) {
+			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
+			abort();
+		}	
+	}
+
+    ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
+    ESP_ERROR_CHECK(dce_g->store_profile(dce_g));
+    /* Print Module ID, Operator, IMEI, IMSI */
+    ESP_LOGI(TAG, "Module: %s", dce_g->name);
+    ESP_LOGI(TAG, "Operator: %s", dce_g->oper);
+    ESP_LOGI(TAG, "IMEI: %s", dce_g->imei);
+    ESP_LOGI(TAG, "IMSI: %s", dce_g->imsi);
+    /* Get signal quality */
+    uint32_t rssi = 0, ber = 0;
+    dce_g->get_signal_quality(dce_g, &rssi, &ber);
+    ESP_LOGI(TAG, "rssi: %u, ber: %u", rssi, ber);
+	
+	strcpy(debug_data.imei, dce_g->imei);
+	strcpy(debug_data.oper, dce_g->oper);
+	debug_data.rssi = rssi;
+	debug_data.ber = ber;
+
+    /* Get battery voltage */
+    uint32_t voltage = 0, bcs = 0, bcl = 0;
+    dce_g->get_battery_status(dce_g, &bcs, &bcl, &voltage);
+    ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
+	debug_data.battery_voltage = voltage;	
+
+    /* Setup PPP environment */
+    if(esp_modem_setup_ppp(dte_g) == ESP_FAIL) {
+		ESP_LOGE(TAG, "Modem PPP setup failed");
+		abort();
+	}
+
+    /* Modem and HTTP server up */
+    gpio_set_level(GPIO_STATUS_PIN_0,1);
+    gpio_set_level(GPIO_STATUS_PIN_1,1);
+    gpio_set_level(GPIO_STATUS_PIN_2,0);/* Set Blue LED */
+	
+    /* Wait for IP address */
+    xEventGroupWaitBits(modem_event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+
+#if CONFIG_SEND_MSG
+    const char *message = "Welcome to ESP32!";
+    ESP_ERROR_CHECK(modem_send_message_text(dce_g, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
+    ESP_LOGI(TAG, "Send message [%s] ok", message);
+#endif
+    
+	/* Start NTP sync */
+    setup_sntp();
+}
+
 void normal_tasks()
 {
     static httpd_handle_t http_server = NULL;
-	uint8_t retries; 
 
 	getMacAddress(user_mqtt_str); // Mac address is used as a unique id of the device in json packets.
 
 	read_sysconfig();
 	
-    /* Wait for 5 secs for Modem to boot correctly*/ 
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+	ESP_LOGI(TAG, "Waiting 10 sec for the modem to warm up");
+	vTaskDelay(10000 / portTICK_PERIOD_MS);
+	
 	// Get the homepage up: Initialize webserver, register all handlers
     http_server = start_webserver();
   
@@ -635,90 +796,9 @@ void normal_tasks()
  
     modem_event_group = xEventGroupCreate();
     esp_event_group = xEventGroupCreate();
-    /* create dte object */
-    esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();
 
-    modem_dte_t *dte;
-	retries = 0;
-	while((dte = esp_modem_dte_init(&config)) == NULL)
-	{
-		vTaskDelay(10000 / portTICK_PERIOD_MS);
-	    retries++;
-		if (retries > 30) {
-			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
-			abort();
-		}	
-	}
+	mobile_radio_init();
 
-    /* Register event handler */
-    ESP_ERROR_CHECK(esp_modem_add_event_handler(dte, modem_event_handler, NULL));
-    /* create dce object */
-
-	modem_dce_t *dce;
-	retries = 0;
-    /* Wait for 2 secs for Modem info to populate*/ 
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-	while ((dce = sim800_init(dte)) == NULL) 
-	{
-		vTaskDelay(10000 / portTICK_PERIOD_MS);
-	    retries++;
-		if (retries > 30) {
-			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
-			abort();
-		}	
-	}
-
-    ESP_ERROR_CHECK(dce->set_flow_ctrl(dce, MODEM_FLOW_CONTROL_NONE));
-    ESP_ERROR_CHECK(dce->store_profile(dce));
-    /* Print Module ID, Operator, IMEI, IMSI */
-    ESP_LOGI(TAG, "Module: %s", dce->name);
-    ESP_LOGI(TAG, "Operator: %s", dce->oper);
-    ESP_LOGI(TAG, "IMEI: %s", dce->imei);
-    ESP_LOGI(TAG, "IMSI: %s", dce->imsi);
-    /* Get signal quality */
-    uint32_t rssi = 0, ber = 0;
-    dce->get_signal_quality(dce, &rssi, &ber);
-    ESP_LOGI(TAG, "rssi: %u, ber: %u", rssi, ber);
-	
-	strcpy(debug_data.imei, dce->imei);
-	strcpy(debug_data.oper, dce->oper);
-	debug_data.rssi = rssi;
-	debug_data.ber = ber;
-
-    /* Get battery voltage */
-    uint32_t voltage = 0, bcs = 0, bcl = 0;
-    dce->get_battery_status(dce, &bcs, &bcl, &voltage);
-    ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
-    /* Setup PPP environment */
-    if(esp_modem_setup_ppp(dte) == ESP_FAIL) {
-		ESP_LOGE(TAG, "Modem PPP setup failed");
-		abort();
-	}
-
-    /* Modem and HTTP server up */
-     gpio_set_level(GPIO_STATUS_PIN_0,1);
-     gpio_set_level(GPIO_STATUS_PIN_1,1);
-     gpio_set_level(GPIO_STATUS_PIN_2,0);/* Set Blue LED */
-	
-    /* Wait for IP address */
-    xEventGroupWaitBits(modem_event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-//    xEventGroupWaitBits(modem_event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    /* Exit PPP mode */
-//    ESP_ERROR_CHECK(esp_modem_exit_ppp(dte));
-//    xEventGroupWaitBits(modem_event_group, STOP_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-#if CONFIG_SEND_MSG
-    const char *message = "Welcome to ESP32!";
-    ESP_ERROR_CHECK(modem_send_message_text(dce, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
-    ESP_LOGI(TAG, "Send message [%s] ok", message);
-#endif
-    /* Power down module */
-//    ESP_ERROR_CHECK(dce->power_down(dce));
-//    RAAHI_LOGI(TAG, "Power down");
-//    ESP_ERROR_CHECK(dce->deinit(dce));
-//    ESP_ERROR_CHECK(dte->deinit(dte));
-
-    /* Start NTP sync */
-    setup_sntp();
     xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 1);
 }
