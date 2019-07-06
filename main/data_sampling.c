@@ -43,6 +43,9 @@ static const int RX_BUF_SIZE = 1024;
 /* Global variables */
 static const char *TAG = "data_sampling_task";
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
+extern EventGroupHandle_t esp_event_group;
+extern const int SNTP_CONNECT_BIT;
+extern int today, this_hour;
 
 static const uint8_t aucCRCHi[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
@@ -371,11 +374,6 @@ void data_sampling_task(void *param)
     
   	time_t now;
     struct tm timeinfo;
-	int today;
-
-	time(&now);
-    localtime_r(&now, &timeinfo);
-	today = timeinfo.tm_mday;
 
 	uart_config_t uart_config = {
         .baud_rate = BAUD_RATE,
@@ -425,12 +423,16 @@ void data_sampling_task(void *param)
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 	
 		// We should restart every 1 day to make sure the code isn't stuck in some place forever
-		time(&now);
-    	localtime_r(&now, &timeinfo);
-		if (timeinfo.tm_mday != today) {
-			today = timeinfo.tm_mday;
-			RAAHI_LOGI(TAG, "Restarting in 10 sec since 24hrs have passed");
-			abort();
+    	if(xEventGroupGetBits(esp_event_group)  & SNTP_CONNECT_BIT)
+		{
+			time(&now);
+    		localtime_r(&now, &timeinfo);
+			if (timeinfo.tm_mday != today) {
+				today = timeinfo.tm_mday;
+				RAAHI_LOGI(TAG, "Restarting in 10 sec since 24hrs have passed");
+				vTaskDelay(1000/portTICK_RATE_MS);
+				abort();
+			}
 		}
 	
 	}// End of infinite while loop		

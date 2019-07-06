@@ -66,12 +66,12 @@ void data_sampling_task(void*);
 void mobile_radio_init(void);
 
 static EventGroupHandle_t modem_event_group = NULL;
-static EventGroupHandle_t esp_event_group = NULL;
+EventGroupHandle_t esp_event_group = NULL;
 //EventGroupHandle_t mqtt_rw_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
-static const int SNTP_CONNECT_BIT = BIT0;
+const int SNTP_CONNECT_BIT = BIT0;
 //const int READ_OP_DONE = BIT0;
 //const int WRITE_OP_DONE = BIT1;
 
@@ -127,6 +127,7 @@ struct config_struct sysconfig;
 struct data_json_struct data_json;
 struct event_json_struct event_json;
 struct debug_data_struct debug_data;
+int today, this_hour;
 /**
  * This is a example example which echos any data it receives on UART back to the sender.
  *
@@ -204,6 +205,8 @@ static void setup_sntp(void)
     setenv("TZ", "IST-5:30", 1);
     tzset();
     localtime_r(&now, &timeinfo);
+	today = timeinfo.tm_mday;
+	this_hour = timeinfo.tm_hour;
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
     ESP_LOGI(TAG, "The current date/time in India is: %s", strftime_buf);
     xEventGroupSetBits(esp_event_group, SNTP_CONNECT_BIT);
@@ -486,7 +489,7 @@ void aws_iot_task(void *param) {
 	uint8_t failures_counter = 0, other_failures_counter = 0;
     while(1) { 
 		//Max time the yield function will wait for read messages
-        yield_rc = aws_iot_mqtt_yield(&client, 100);
+        yield_rc = aws_iot_mqtt_yield(&client, 5000);
 		if (SUCCESS != yield_rc) {
 			ESP_LOGI(TAG, "MQTT yeild wasn't successful");
 		}
@@ -765,6 +768,9 @@ void normal_tasks()
 	ESP_LOGI(TAG, "Waiting 10 sec for the modem to warm up");
 	vTaskDelay(10000 / portTICK_PERIOD_MS);
 	
+    modem_event_group = xEventGroupCreate();
+    esp_event_group = xEventGroupCreate();
+	
 	// Get the homepage up: Initialize webserver, register all handlers
     http_server = start_webserver();
   
@@ -779,12 +785,8 @@ void normal_tasks()
 
 	xTaskCreate(data_sampling_task, "data_sampling_task", 8192, NULL, 10, NULL);	
 	
- 
-    modem_event_group = xEventGroupCreate();
-    esp_event_group = xEventGroupCreate();
-
 	mobile_radio_init();
 
-    xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 1);
 }
