@@ -15,7 +15,7 @@
 #include "raahi.h"
 
 // Defines
-#define FORM_DATA_BUF_SIZE 256
+#define FORM_DATA_BUF_SIZE 256 
 
 
 // External variables
@@ -94,6 +94,10 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 	
 	//httpd_resp_set_type(req, "text/html"); 
     httpd_resp_send_chunk(req, (const char *)infopage_start, infopage_size);
+	
+	tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>Client ID</td><td>%s</td></tr>\n", sysconfig.client_id); 
+	httpd_resp_sendstr_chunk(req, tempStr);
 	
 	tempStr[0] = '\0';
 	sprintf(tempStr, "\t\t<tr><td>FW Ver</td><td>%s</td></tr>\n", debug_data.fw_ver); 
@@ -209,6 +213,7 @@ void update_sysconfig(char* form_str)
 	char* tmpStr;
 	uint8_t tmpIndex;
 	int32_t  tmpVal;
+	uint8_t client_id_updated = 0;
 	
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
@@ -244,7 +249,22 @@ void update_sysconfig(char* form_str)
 	if((tmpVal = str2num(tmpStr, '&', 4)) >= 0) {
 		sysconfig.sampling_period_in_sec = (uint8_t)tmpVal;
 	}
- 		
+ 	
+	tmpStr = strstr(form_str, "client_id=") + strlen("client_id=");
+	tmpIndex = 0;
+	while(tmpStr[tmpIndex] != '&') 
+	{
+		sysconfig.client_id[tmpIndex] = tmpStr[tmpIndex];
+		if (tmpIndex > MAX_CLIENT_ID_LEN) {
+			break;
+		}
+		tmpIndex++;
+	}
+	if (tmpIndex != 0) { // Update only if user entered a value	
+		sysconfig.client_id[tmpIndex] = '\0';
+		client_id_updated = 1;
+	}
+
 	tmpStr = strstr(form_str, "topic=") + strlen("topic=");
 	tmpIndex = 0;
 	while(tmpStr[tmpIndex] != '&') 
@@ -293,6 +313,12 @@ void update_sysconfig(char* form_str)
 		RAAHI_LOGI(TAG, "Successfully updated sysconfig file");
 	}
 	fclose(config_file);
+
+	if(client_id_updated == 1) {
+		ESP_LOGI(TAG, "Client ID updated. So restarting");
+       	vTaskDelay(5000 / portTICK_RATE_MS);
+		esp_restart();
+	}
 }
 
 /* -----------------------------------------------------------
@@ -331,7 +357,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req)
 	}
 	
 	buf[FORM_DATA_BUF_SIZE]	= '\0'; // As a safety measure against pointer run away issues
-	RAAHI_LOGI(TAG, "Received string: %s\n", buf);
+	//RAAHI_LOGI(TAG, "Received string: %s\n", buf);
 
 	update_sysconfig(buf);	
 

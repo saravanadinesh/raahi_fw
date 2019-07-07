@@ -423,8 +423,8 @@ void aws_iot_task(void *param) {
     mqttInitParams.pDevicePrivateKeyLocation = DEVICE_PRIVATE_KEY_PATH;
 #endif
 
-    mqttInitParams.mqttCommandTimeout_ms = 20000;
-    mqttInitParams.tlsHandshakeTimeout_ms = 5000;
+    mqttInitParams.mqttCommandTimeout_ms = 30000;
+    mqttInitParams.tlsHandshakeTimeout_ms = 30000;
     mqttInitParams.isSSLHostnameVerify = true;
     mqttInitParams.disconnectHandler = disconnectCallbackHandler;
     mqttInitParams.disconnectHandlerData = NULL;
@@ -440,12 +440,12 @@ void aws_iot_task(void *param) {
 //    xEventGroupWaitBits(wifi_modem_event_group, CONNECTED_BIT,
 //                        false, true, portMAX_DELAY);
 
-    connectParams.keepAliveIntervalInSec = 10;
+    connectParams.keepAliveIntervalInSec = 30;
     connectParams.isCleanSession = true;
     connectParams.MQTTVersion = MQTT_3_1_1;
     /* Client ID is set in the menuconfig of the example */
-    connectParams.pClientID = CONFIG_AWS_EXAMPLE_CLIENT_ID;
-    connectParams.clientIDLen = (uint16_t) strlen(CONFIG_AWS_EXAMPLE_CLIENT_ID);
+    connectParams.pClientID = sysconfig.client_id;
+    connectParams.clientIDLen = (uint16_t) strlen(sysconfig.client_id);
     connectParams.isWillMsgPresent = false;
 
     ESP_LOGI(TAG, "Connecting to AWS...");
@@ -476,6 +476,9 @@ void aws_iot_task(void *param) {
     }
 	RAAHI_LOGI(TAG, "Subscribed to %s", topic);
 	RAAHI_LOGI(TAG, "FW Version: %s", debug_data.fw_ver);
+	RAAHI_LOGI(TAG, "RSSI: %u", debug_data.rssi);
+	RAAHI_LOGI(TAG, "BER: %u", debug_data.ber);
+
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
     dataPacket.qos = QOS0;
     dataPacket.payload = (void *) dPayload;
@@ -489,12 +492,13 @@ void aws_iot_task(void *param) {
 	uint8_t failures_counter = 0, other_failures_counter = 0;
     while(1) { 
 		//Max time the yield function will wait for read messages
-        yield_rc = aws_iot_mqtt_yield(&client, 5000);
+        yield_rc = aws_iot_mqtt_yield(&client, 15000);
 		if (SUCCESS != yield_rc) {
 			ESP_LOGI(TAG, "MQTT yeild wasn't successful");
 		}
-	
-		if (data_json.write_ptr != data_json.read_ptr) { // Implies there are unsent mqtt messages
+
+			
+		while ((data_json.write_ptr != data_json.read_ptr) && rc == SUCCESS){ // Implies there are unsent mqtt messages
 		    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
 		    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
 		    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
@@ -507,10 +511,12 @@ void aws_iot_task(void *param) {
 			
 		    if (rc == SUCCESS) { 
 		        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
+				ESP_LOGI(TAG, "Sent a data json");
 		    }
 			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 		}
-		if (event_json.write_ptr != event_json.read_ptr) { // Implies there are unsent mqtt messages
+
+		while ((event_json.write_ptr != event_json.read_ptr) && rc == SUCCESS) { // Implies there are unsent mqtt messages
 			strcpy(ePayload, event_json.packet[event_json.read_ptr]);     	
 			eventPacket.payloadLen = strlen(ePayload);
         	    rc = aws_iot_mqtt_publish(&client, event_topic, strlen(event_topic), &eventPacket);
@@ -521,6 +527,7 @@ void aws_iot_task(void *param) {
 			
 		    if (rc == SUCCESS) { 
 				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+				ESP_LOGI(TAG, "Sent an event json");
         	}
 		}
 
@@ -606,7 +613,8 @@ void display_sysconfig(void)
 
 	// Display the rest of the information
 	RAAHI_LOGI(TAG, "Sampling period (sec): %d", sysconfig.sampling_period_in_sec);
-	
+
+	RAAHI_LOGI(TAG, "Client ID: %s", sysconfig.client_id);	
 	RAAHI_LOGI(TAG, "Topic: %s", sysconfig.topic);
 	RAAHI_LOGI(TAG, "Apn: %s", sysconfig.apn);
 	
@@ -633,6 +641,7 @@ void read_sysconfig()
 	default_config.reg_address[1] = CONFIG_SECOND_REG;
 	default_config.reg_address[2] = CONFIG_THIRD_REG;
 	default_config.sampling_period_in_sec = CONFIG_SAMPLING_PERIOD;
+	strcpy(default_config.client_id, CONFIG_AWS_EXAMPLE_CLIENT_ID);
 	strcpy(default_config.topic, CONFIG_MQTT_TOPIC_ROOT);
 	strcpy(default_config.apn, CONFIG_ESP_MODEM_APN);
 

@@ -9,6 +9,7 @@
 #define MAX_TOPIC_LEN 30
 #define MAX_APN_LEN 20
 #define MAX_MODBUS_SLAVES 2
+#define MAX_CLIENT_ID_LEN 20
 #define MAX_MODBUS_REGISTERS 3
 #define MAX_DEVICE_ID_LEN 20
 #define DATA_JSON_QUEUE_SIZE 10
@@ -16,7 +17,6 @@
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 250
 #define MAX_AWS_FAILURE_COUNT 10
-
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
 
@@ -65,7 +65,8 @@ struct config_struct {
 	uint8_t slave_id[MAX_MODBUS_SLAVES];
 	uint16_t reg_address[MAX_MODBUS_REGISTERS];
 	uint16_t sampling_period_in_sec;
-	
+
+	char client_id[MAX_CLIENT_ID_LEN + 1];	
 	char topic[MAX_TOPIC_LEN + 1];
 	char apn[MAX_APN_LEN + 1];
 };
