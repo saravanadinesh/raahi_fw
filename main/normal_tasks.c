@@ -305,10 +305,10 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 {
     switch (event_id) {
     case MODEM_EVENT_PPP_START:
-        ESP_LOGI(TAG, "Modem PPP Started");
+        RAAHI_LOGI(TAG, "Modem PPP Started");
         break;
     case MODEM_EVENT_PPP_CONNECT:
-        ESP_LOGI(TAG, "Modem Connect to PPP Server");
+        RAAHI_LOGI(TAG, "Modem Connect to PPP Server");
         ppp_client_ip_info_t *ipinfo = (ppp_client_ip_info_t *)(event_data);
         ESP_LOGI(TAG, "~~~~~~~~~~~~~~");
         ESP_LOGI(TAG, "IP          : " IPSTR, IP2STR(&ipinfo->ip));
@@ -322,18 +322,11 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     case MODEM_EVENT_PPP_DISCONNECT:
         ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
 		// Restart modem
-    	if(esp_modem_exit_ppp(dte_g) == ESP_FAIL) {
-			ESP_LOGE(TAG, "Modem PPP exit failed while attempting modem restart");
-			abort();
-		}
-		ESP_ERROR_CHECK(dce_g->power_down(dce_g));
-		ESP_ERROR_CHECK(dce_g->deinit(dce_g));
-		ESP_ERROR_CHECK(dte_g->deinit(dte_g));
-		vTaskDelay(1000/portTICK_RATE_MS);
-		mobile_radio_init();
-        break;
+        vTaskDelay(1000/portTICK_RATE_MS);
+		abort();
+		break;
     case MODEM_EVENT_PPP_STOP:
-        ESP_LOGI(TAG, "Modem PPP Stopped");
+        RAAHI_LOGI(TAG, "Modem PPP Stopped");
         xEventGroupSetBits(modem_event_group, STOP_BIT);
         break;
     case MODEM_EVENT_UNKNOWN:
@@ -377,6 +370,7 @@ void aws_iot_task(void *param) {
 	char topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char data_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char event_topic[MAX_TOPIC_LEN + 1] = {'\0'};
+	char subscribe_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 
 
 	char dPayload[DATA_JSON_STR_SIZE] = {'\0'};
@@ -391,6 +385,10 @@ void aws_iot_task(void *param) {
 
 	strcpy(event_topic, topic);
 	strcat(event_topic, "/event");
+	
+	strcpy(subscribe_topic, topic);
+	strcat(subscribe_topic, "/");
+	strcat(subscribe_topic, user_mqtt_str);
 	
 	IoT_Publish_Message_Params dataPacket;
 	IoT_Publish_Message_Params eventPacket;
@@ -469,15 +467,16 @@ void aws_iot_task(void *param) {
     }
 
     RAAHI_LOGI(TAG, "Subscribing...");
-    rc = aws_iot_mqtt_subscribe(&client, topic, strlen(topic), QOS0, iot_subscribe_callback_handler, NULL);
+    rc = aws_iot_mqtt_subscribe(&client, subscribe_topic, strlen(subscribe_topic), QOS0, iot_subscribe_callback_handler, NULL);
     if(SUCCESS != rc) {
         RAAHI_LOGE(TAG, "Error subscribing : %d ", rc);
         abort();
     }
-	RAAHI_LOGI(TAG, "Subscribed to %s", topic);
+	RAAHI_LOGI(TAG, "Subscribed to %s", subscribe_topic);
 	RAAHI_LOGI(TAG, "FW Version: %s", debug_data.fw_ver);
 	RAAHI_LOGI(TAG, "RSSI: %u", debug_data.rssi);
 	RAAHI_LOGI(TAG, "BER: %u", debug_data.ber);
+	RAAHI_LOGI(TAG, "Battery Voltage: %u", debug_data.battery_voltage);
 
     //TODO: We have to send a hello message: sprintf(cPayload, "%s : %d ", "hello from SDK", i);
     dataPacket.qos = QOS0;
