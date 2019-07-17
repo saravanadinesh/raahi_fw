@@ -1,5 +1,5 @@
-set(COMPONENT_SRCS "subscribe_publish_sample.c")
-set(COMPONENT_ADD_INCLUDEDIRS ".")
+set(COMPONENT_SRCS "main.c" "normal_tasks.c" "data_sampling.c" "http_server.c")
+set(COMPONENT_ADD_INCLUDEDIRS "." "./components/modem/include")
 
 set(COMPONENT_EMBED_FILES "favicon.ico" "ota_index.html" "index.html" "info.html")
 

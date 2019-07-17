@@ -208,7 +208,7 @@ static esp_err_t modbus_read(uint8_t slave_id, uint16_t reg_address, uint16_t* r
 void modbus_sensor_task()
 {
 	uint16_t modbus_read_result;
-    char cPayload[DATA_JSON_STR_SIZE];
+	char cPayload[DATA_JSON_STR_SIZE];
 	uint8_t slave_id_idx, reg_address_idx;
 	esp_err_t modbus_read_ret_val;
 	time_t now;

@@ -70,7 +70,6 @@ EventGroupHandle_t esp_event_group = NULL;
 //EventGroupHandle_t mqtt_rw_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
-static const int GOT_DATA_BIT = BIT2;
 const int SNTP_CONNECT_BIT = BIT0;
 //const int READ_OP_DONE = BIT0;
 //const int WRITE_OP_DONE = BIT1;
@@ -642,7 +641,7 @@ void read_sysconfig()
 	default_config.sampling_period_in_sec = CONFIG_SAMPLING_PERIOD;
 	strcpy(default_config.client_id, CONFIG_AWS_EXAMPLE_CLIENT_ID);
 	strcpy(default_config.topic, CONFIG_MQTT_TOPIC_ROOT);
-	strcpy(default_config.apn, CONFIG_ESP_MODEM_APN);
+	strcpy(default_config.apn, CONFIG_EXAMPLE_MODEM_APN);
 
 	config_file = fopen(config_file_name, "rb");
 	if (config_file == NULL) { // If config file isnt' present, create one with default values
