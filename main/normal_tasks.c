@@ -64,6 +64,8 @@ char raahi_log_str[EVENT_JSON_STR_SIZE];
 httpd_handle_t start_webserver(void);
 void data_sampling_task(void*);
 void mobile_radio_init(void);
+void display_sysconfig(void);
+extern int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len);
 
 static EventGroupHandle_t modem_event_group = NULL;
 EventGroupHandle_t esp_event_group = NULL;
@@ -336,10 +338,223 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     }
 }
 
+
+uint8_t parseJson(char* json_str, uint16_t json_str_len, struct json_struct* parsed_result)
+{
+    uint16_t char_count = 0;
+    uint8_t item_count = 0;
+    bool key_s_turn = true;
+    uint8_t local_char_idx = 0;
+
+    while (item_count < MAX_SUBSCRIBE_JSON_ITEMS && char_count < json_str_len)
+    {
+        // First parse the key
+        while(char_count < json_str_len) // Move to the first double quote
+        {
+            if (json_str[char_count] == '\"') {
+                char_count++;
+                break;
+            }
+            
+            char_count++;
+        }
+
+        if (key_s_turn == true) // If it is the key's turn to be parsed
+        {
+            while(char_count < json_str_len)
+            {
+
+                if (json_str[char_count] == '\"') {
+                    parsed_result[item_count].key[local_char_idx] = '\0';
+                    char_count++;
+                    key_s_turn = false;
+                    local_char_idx = 0;
+                    break;
+                }
+            
+                parsed_result[item_count].key[local_char_idx] = json_str[char_count];
+                local_char_idx++;
+                if (local_char_idx >= MAX_KEY_LEN) 
+                {
+                    RAAHI_LOGE(TAG, "Json parse error. Key too long");
+                    return(item_count);
+                } 
+                char_count++;
+            }
+        
+        } // Parsing keys loop 
+
+        else // It is the value's turn to be parsed
+        {
+            while(char_count < json_str_len)
+            {
+
+                if (json_str[char_count] == '\"') {
+                    parsed_result[item_count].value[local_char_idx] = '\0';
+                    char_count++;
+                    key_s_turn = true;
+                    local_char_idx = 0;
+                    item_count++;
+                    break;
+                }
+            
+                parsed_result[item_count].value[local_char_idx] = json_str[char_count];
+                local_char_idx++;
+                if (local_char_idx >= MAX_VALUE_LEN) 
+                {
+                    RAAHI_LOGE(TAG, "Json parse error. Value too long");
+                    return(item_count);
+                } 
+                char_count++;
+            }
+        } // Parsing values loop
+
+    } // Iteration through items  
+  
+    return(item_count);
+} // End of parse_Json function
+
+void sysconfig_json_write(struct json_struct* parsed_json, uint8_t no_of_items)
+{
+    uint8_t item_idx;
+    int32_t tmpVal;
+	static const char* config_file_name = "/spiffs/sysconfig.txt";
+	FILE* config_file = NULL;
+    bool client_id_updated = false;
+
+    for(item_idx = 1; item_idx < no_of_items; item_idx++) // We are starting from 1 because the 0th index contained type info that has already been parsed
+    {
+        if(strcmp(parsed_json[item_idx].key, "first_slave_id") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 4)) >= 0) { // Update only if the value is not negative (indicating conversion error)
+		        sysconfig.slave_id[0] = (uint8_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "second_slave_id") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 4)) >= 0) {
+		        sysconfig.slave_id[1] = (uint8_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "first_reg_address") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 6)) >= 0) {
+		        sysconfig.reg_address[0] = (uint16_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "second_reg_address") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 6)) >= 0) {
+		        sysconfig.reg_address[1] = (uint16_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "third_reg_address") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 6)) >= 0) {
+		        sysconfig.reg_address[2] = (uint16_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "sampling_period_in_sec") == 0)
+        {
+	        if((tmpVal = str2num(parsed_json[item_idx].value, '\0', 4)) >= 0) {
+		        sysconfig.sampling_period_in_sec = (uint8_t)tmpVal;
+	        }
+        }
+        else if(strcmp(parsed_json[item_idx].key, "client_id") == 0)
+        {
+            strcpy(sysconfig.client_id,  parsed_json[item_idx].value);
+            client_id_updated = true;
+        }
+        else if(strcmp(parsed_json[item_idx].key, "topic") == 0)
+        {
+            strcpy(sysconfig.topic,  parsed_json[item_idx].value);
+        }
+        else if(strcmp(parsed_json[item_idx].key, "apn") == 0)
+        {
+            strcpy(sysconfig.apn,  parsed_json[item_idx].value);
+        }
+        else // Error check
+        {
+            RAAHI_LOGE(TAG, "Unknown key encountered. key = %s", parsed_json[item_idx].key);
+        }
+    }
+
+    if(no_of_items > 1) // Just a protection against a json that only has type field
+    {
+        display_sysconfig(); // so that we will know in AWS if the changes have indeed taken place
+	    config_file = fopen(config_file_name, "wb");
+
+	    if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+	    	RAAHI_LOGE(TAG, "Couldn't update sysconfig file although it is present");
+	    	abort();
+	    } else {
+	    	RAAHI_LOGI(TAG, "Successfully updated sysconfig file");
+	    }
+	    fclose(config_file);
+
+	    if(client_id_updated == true) {
+	    	ESP_LOGI(TAG, "Client ID updated. So restarting");
+           	vTaskDelay(5000 / portTICK_RATE_MS);
+	    	esp_restart();
+	    }
+    }
+
+}
+
+void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
+{
+    if (no_of_items > 2)
+    {
+        RAAHI_LOGE(TAG, "Only one command cand be issued at a time");
+    }
+    else if (no_of_items < 2)
+    {
+        RAAHI_LOGE(TAG, "Empty command json");
+    }
+    else // When no_of_items == 2, we can do something
+    {
+        if(strcmp(parsed_json[1].value, "restart") == 0)
+        {
+            RAAHI_LOGI(TAG, "Restart command received. Restarting in 5 seconds");
+            vTaskDelay(5000/ portTICK_RATE_MS);
+            esp_restart();
+        }
+        else
+        {
+            RAAHI_LOGI(TAG, "Unknown command received. No action taken");
+        }    
+    }
+}
+
 void iot_subscribe_callback_handler(AWS_IoT_Client *pClient, char *topicName, uint16_t topicNameLen,
                                     IoT_Publish_Message_Params *params, void *pData) {
-    RAAHI_LOGI(TAG, "Subscribe callback");
-    RAAHI_LOGI(TAG, "%.*s\t%.*s", topicNameLen, topicName, (int) params->payloadLen, (char *)params->payload);
+    struct json_struct parsed_json[MAX_SUBSCRIBE_JSON_ITEMS];
+    uint8_t no_of_items, item_idx;
+	
+    ESP_LOGI(TAG, "Subscribe callback");
+    ESP_LOGI(TAG, "%.*s\t%.*s", topicNameLen, topicName, (int) params->payloadLen, (char *)params->payload);
+    no_of_items = parseJson(params->payload, params->payloadLen, parsed_json);
+    if (no_of_items > 0) {
+        if (strcmp(parsed_json[0].key, "type") == 0 && strcmp(parsed_json[0].value, "config") == 0)
+        {
+            sysconfig_json_write(parsed_json, no_of_items);
+        }
+        else if (strcmp(parsed_json[0].key, "type") == 0 && strcmp(parsed_json[0].value, "command") == 0) 
+        {
+            execute_json_command(parsed_json, no_of_items);
+        }
+        else
+        {
+            RAAHI_LOGE(TAG, "Message type isn't recognized or wasn't populated");
+        }
+            
+        // Debug prints
+        printf("Parsed Json items\n");
+        for(item_idx = 0; item_idx < no_of_items; item_idx++)
+        {
+            printf("%s: %s\n", parsed_json[item_idx].key, parsed_json[item_idx].value);
+        } // End of for loop
+    } 
 }
 
 void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {

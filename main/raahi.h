@@ -19,6 +19,9 @@
 #define MAX_AWS_FAILURE_COUNT 10
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
+#define MAX_SUBSCRIBE_JSON_ITEMS 10
+#define MAX_KEY_LEN 20
+#define MAX_VALUE_LEN 20
 
 #define RAAHI_LOGE( tag, format, ... ) do {\
 	ESP_LOGE(tag, format, ##__VA_ARGS__);\
@@ -93,6 +96,7 @@ struct slave_info_struct {
 	enum slave_status status;
 	uint16_t data[MAX_MODBUS_REGISTERS]; 
 };
+
 struct debug_data_struct {
 	char fw_ver[5];
     char imei[MODEM_IMEI_LENGTH + 1]; 	
@@ -102,4 +106,10 @@ struct debug_data_struct {
 	uint32_t battery_voltage;
 	struct slave_info_struct slave_info[MAX_MODBUS_SLAVES];
 };
+
+struct json_struct {
+    char key[MAX_KEY_LEN];
+    char value[MAX_VALUE_LEN];
+};
+
 #endif //#ifndef _RAAHI_FW_H_

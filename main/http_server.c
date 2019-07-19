@@ -26,7 +26,7 @@ extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
 
 // Function declarations
-void display_sysconfig();
+extern void display_sysconfig();
 
 /* -----------------------------------------------------------
 | 	homepage_get_handler()
@@ -171,7 +171,7 @@ static const httpd_uri_t infopage = {
 | 	WARNING: The numbers represented as characters are expected
 |	to be decimal values. i.e., hex is not allowed
 ------------------------------------------------------------*/
-static int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
+int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
 {
 	uint8_t index = 0;
 	int32_t result = 0; // TODO: Re-examine. 0 could be a legit input
@@ -298,7 +298,7 @@ void update_sysconfig(char* form_str)
 	display_sysconfig();
 
 	config_file = fopen(config_file_name, "rb");
-	if (config_file == NULL) { // If config file isnt' present, create one with default values
+	if (config_file == NULL) { // If config file isnt' present 
 		RAAHI_LOGE(TAG, "Config file not present. Can't update sysconfig!");
 		abort();
 	}
