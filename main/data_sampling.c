@@ -26,7 +26,7 @@
 #define MODBUS_RTS   (21)
 #define MODBUS_CTS  UART_PIN_NO_CHANGE
 // GPS receiver related Defines
-#define GPS_TASK_TXD   (18)
+#define GPS_TASK_TXD   (26)
 #define GPS_TASK_RXD   (27)
 #define GPS_TASK_RTS  UART_PIN_NO_CHANGE
 #define GPS_TASK_CTS  UART_PIN_NO_CHANGE
@@ -434,7 +434,8 @@ esp_err_t read_mcp342x(uint8_t channel, uint16_t* data)
 	esp_err_t ret;
 	i2c_port_t i2c_num = I2C_MASTER_NUM;
 
-	// Configure the ADC 
+	// Configure the ADC
+	config_reg.fields.rdy = 1; 
 	config_reg.fields.conv_mode = ONE_SHOT_CONVERSION;
 	config_reg.fields.resolution = RESOLUTION_16BITS_15SPS;
 	config_reg.fields.channel = channel;
@@ -452,7 +453,7 @@ esp_err_t read_mcp342x(uint8_t channel, uint16_t* data)
         return ret;
     }
    
-	vTaskDelay(50 / portTICK_RATE_MS);
+	vTaskDelay(100 / portTICK_RATE_MS);
     cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, MCP342X_ADDRESS << 1 | I2C_MASTER_READ, ADC_ACK_CHECK_EN);
@@ -466,18 +467,17 @@ esp_err_t read_mcp342x(uint8_t channel, uint16_t* data)
 
 	if (reg_val  != (config_reg.word & 0x7F)) // Mask out the RDY bit and check if the rest of the reg value is as expected
 	{
-		RAAHI_LOGE(TAG, "ADC config register read back with wrong value");
+		RAAHI_LOGE(TAG, "ADC config register was writtent with %x, but read back %x", config_reg.word, reg_val);
 		return(ESP_FAIL);
 	}
 
-	if ((reg_val & 0x80) != 0)	// Check the RDY bit to ensure data result is a fresh conversion
+	if ((reg_val & 0x80) == 0)	// Check the RDY bit to ensure data result is a fresh conversion
 	{
 		*data = (data_h << 8) | data_l ;
 		return(ESP_OK); 
 	}
 	else
 	{
-		printf("Register value = %x \n", reg_val);
 		return(ESP_FAIL);
 	}
  
@@ -526,7 +526,7 @@ void adc_sensor_task()
 			continue;
 		}
 
-		voltage_mV = result * mV_per_bit;
+		voltage_mV = data * mV_per_bit;
 		time(&now);
 		switch(sysconfig.analog_sensor_type[channel])
 		{
@@ -548,7 +548,6 @@ void adc_sensor_task()
 					"adc_channel", channel, \
         	        "adc_reading", resistance_ohms, \
         	        "unit", "ohms");
-				printf("Resistance = %.6f\n ohms", resistance_ohms);
 				break;
 
 			case DIRECT:
