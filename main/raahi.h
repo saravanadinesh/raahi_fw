@@ -11,6 +11,7 @@
 #define MAX_MODBUS_SLAVES 2
 #define MAX_CLIENT_ID_LEN 20
 #define MAX_MODBUS_REGISTERS 3
+#define MAX_ADC_CHANNELS 4
 #define MAX_DEVICE_ID_LEN 20
 #define DATA_JSON_QUEUE_SIZE 10
 #define DATA_JSON_STR_SIZE 250
@@ -64,10 +65,13 @@
 void compose_mqtt_event(const char *TAG, char *msg);
 
 // Data type definitions
+enum adc_port_type {NONE = 0, FOURTWENTY, RESISTIVE, DIRECT};
+ 
 struct config_struct {
 	uint8_t slave_id[MAX_MODBUS_SLAVES];
 	uint16_t reg_address[MAX_MODBUS_REGISTERS];
 	uint16_t sampling_period_in_sec;
+	enum adc_port_type analog_sensor_type[MAX_ADC_CHANNELS];
 
 	char client_id[MAX_CLIENT_ID_LEN + 1];	
 	char topic[MAX_TOPIC_LEN + 1];

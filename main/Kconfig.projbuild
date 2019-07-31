@@ -164,6 +164,63 @@ menu "Example Configuration"
 				The time between two sample sets of sensor data 
 	endmenu	
 
+	menu "I2C Master"
+	    config I2C_MASTER_SCL
+	    int "SCL GPIO Num"
+	    default 19
+	    help
+	        GPIO number for I2C Master clock line.
+	
+	config I2C_MASTER_SDA
+	    int "SDA GPIO Num"
+	    default 18
+	    help
+	        GPIO number for I2C Master data line.
+	
+	config I2C_MASTER_PORT_NUM
+	    int "Port Number"
+	    default 1
+	    help
+	        Port number for I2C Master device.
+	
+	config I2C_MASTER_FREQUENCY
+	    int "Master Frequency"
+	    default 100000
+	    help
+	        I2C Speed of Master device.
+	endmenu
+
+	menu "ADC Configuration"
+		config RESISTIVE_DIVIDER
+			int "Divider resistor for resistive sensors"
+			range 0 20000
+			default 1000
+			help
+				Divider resistor value in ohms
+
+		config DIRECT_VOLTAGE_DIVIDER_RESISTOR
+			int "Divider resistor for voltage sensors"
+			range 0 20000
+			default 1000
+			help
+				Divider resistor value in ohms
+
+		config DIRECT_VOLTAGE_RECEIVER_RESISTOR
+			int "Receiver resistor for voltage sensors"
+			range 1 20000
+			default 100
+			help
+				Receiver resistor value in ohms
+		
+		config CURRENT_LOOP_RECEIVER_RESISTOR
+			int "Receiver resistor for 4-20mA sensors"
+			range 1 20000
+			default 100
+			help
+				Receiver resistor value in ohms
+
+	endmenu
+
     config WIFI_SSID
         string "WiFi SSID"
         default "myssid"

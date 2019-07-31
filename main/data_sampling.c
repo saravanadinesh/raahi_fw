@@ -15,6 +15,7 @@
 #include "esp_log.h"
 #include "soc/uart_struct.h"
 #include "driver/uart.h"
+#include "driver/i2c.h"
 #include "esp32/rom/gpio.h"
 #include "raahi.h"
 #include "esp_sntp.h"
@@ -39,6 +40,51 @@
 static const int RX_BUF_SIZE = 1024;
 
 #define MODBUS_BUF_SIZE 128
+
+// ADC related defines
+#define ONE_SHOT_CONVERSION 0x0
+#define CONTINUOUS_CONVERSION 0x1
+
+#define RESOLUTION_12BITS_240SPS 0X0
+#define RESOLUTION_14BITS_60SPS 0X1
+#define RESOLUTION_16BITS_15SPS 0X2
+#define ADC_RESOLUTION RESOLUTION_16BITS_15SPS
+
+#define NO_GAIN 0x0
+#define GAIN_2X 0x1
+#define GAIN_4X 0x2
+#define GAIN_8X 0x3
+
+#define ADC_ACK_CHECK_EN 0x1                        /*!< I2C master will check ack from slave*/
+#define ADC_ACK_CHECK_DIS 0x0                       /*!< I2C master will not check ack from slave */
+#define ADC_ACK_VAL 0x0                             /*!< I2C ack value */
+#define ADC_NACK_VAL 0x1                            /*!< I2C nack value */
+
+#define MCP342X_ADDRESS 0x68
+
+// I2C master related defines
+#define _I2C_NUMBER(num) I2C_NUM_##num
+#define I2C_NUMBER(num) _I2C_NUMBER(num)
+
+#define I2C_MASTER_SCL_IO CONFIG_I2C_MASTER_SCL               /*!< gpio number for I2C master clock */
+#define I2C_MASTER_SDA_IO CONFIG_I2C_MASTER_SDA               /*!< gpio number for I2C master data  */
+#define I2C_MASTER_NUM I2C_NUMBER(CONFIG_I2C_MASTER_PORT_NUM) /*!< I2C port number for master dev */
+#define I2C_MASTER_FREQ_HZ CONFIG_I2C_MASTER_FREQUENCY        /*!< I2C master clock frequency */
+#define I2C_MASTER_TX_BUF_DISABLE 0                           /*!< I2C master doesn't need buffer */
+#define I2C_MASTER_RX_BUF_DISABLE 0                           /*!< I2C master doesn't need buffer */
+
+union adc_config_reg_datatype
+{
+  struct 
+  {
+    unsigned int gain: 2;
+    unsigned int resolution: 2;
+    unsigned int conv_mode: 1;
+    unsigned int channel: 2;
+    unsigned int rdy: 1;
+  }fields;
+  unsigned int word;
+};
 
 /* Global variables */
 static const char *TAG = "data_sampling_task";
@@ -363,6 +409,170 @@ void gps_sampling_task()
     return;
 }
 
+static esp_err_t i2c_master_init()
+{
+    int i2c_master_port = I2C_MASTER_NUM;
+    i2c_config_t conf;
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = I2C_MASTER_SDA_IO;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.scl_io_num = I2C_MASTER_SCL_IO;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
+    i2c_param_config(i2c_master_port, &conf);
+    return i2c_driver_install(i2c_master_port, conf.mode,
+                              I2C_MASTER_RX_BUF_DISABLE,
+                              I2C_MASTER_TX_BUF_DISABLE, 0);
+} 
+
+esp_err_t read_mcp342x(uint8_t channel, uint16_t* data)
+{
+	
+    i2c_cmd_handle_t cmd;
+	union adc_config_reg_datatype config_reg;
+	uint8_t data_h, data_l, reg_val;  
+	esp_err_t ret;
+	i2c_port_t i2c_num = I2C_MASTER_NUM;
+
+	// Configure the ADC 
+	config_reg.fields.conv_mode = ONE_SHOT_CONVERSION;
+	config_reg.fields.resolution = RESOLUTION_16BITS_15SPS;
+	config_reg.fields.channel = channel;
+	config_reg.fields.gain = NO_GAIN;
+
+	// Write command to ADC to set ADC parameters and start conversion
+	cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, MCP342X_ADDRESS << 1 | I2C_MASTER_WRITE, ADC_ACK_CHECK_EN);
+    i2c_master_write_byte(cmd, config_reg.word, ADC_ACK_CHECK_EN);
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+   
+	vTaskDelay(50 / portTICK_RATE_MS);
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, MCP342X_ADDRESS << 1 | I2C_MASTER_READ, ADC_ACK_CHECK_EN);
+    i2c_master_read_byte(cmd, &data_h, ADC_ACK_VAL);
+    i2c_master_read_byte(cmd, &data_l, ADC_ACK_VAL);
+    i2c_master_read_byte(cmd, &reg_val, ADC_NACK_VAL);
+    
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+
+	if (reg_val  != (config_reg.word & 0x7F)) // Mask out the RDY bit and check if the rest of the reg value is as expected
+	{
+		RAAHI_LOGE(TAG, "ADC config register read back with wrong value");
+		return(ESP_FAIL);
+	}
+
+	if ((reg_val & 0x80) != 0)	// Check the RDY bit to ensure data result is a fresh conversion
+	{
+		*data = (data_h << 8) | data_l ;
+		return(ESP_OK); 
+	}
+	else
+	{
+		printf("Register value = %x \n", reg_val);
+		return(ESP_FAIL);
+	}
+ 
+}
+
+void adc_sensor_task()
+{
+	uint8_t channel;
+	uint16_t data;
+	float voltage_mV, mV_per_bit, current_mA, resistance_ohms, terminal_voltage_mV;
+	esp_err_t result;
+
+	time_t now;	
+    char cPayload[DATA_JSON_STR_SIZE];
+
+	switch(ADC_RESOLUTION)	//Reference: MCP342x datasheet
+	{
+		case RESOLUTION_16BITS_15SPS:
+			mV_per_bit = 0.0625; // 62.5uV
+			break;
+
+		case RESOLUTION_14BITS_60SPS:
+			mV_per_bit = 0.250; // 250uV
+			break;
+
+		case RESOLUTION_12BITS_240SPS:
+			mV_per_bit = 1; // 1mV
+			break;
+	
+		default:
+			RAAHI_LOGE(TAG, "Unknown ADC resolution encountered");
+			return;
+	}
+
+	for (channel = 0; channel < MAX_ADC_CHANNELS; channel++)
+	{
+		if(sysconfig.analog_sensor_type[channel] == NONE)
+		{
+			continue;
+		}
+
+		result = read_mcp342x(channel, &data);
+		if (result != ESP_OK)
+		{
+			RAAHI_LOGE(TAG, "ADC didn't respond while reading channel %u", channel);
+			continue;
+		}
+
+		voltage_mV = result * mV_per_bit;
+		time(&now);
+		switch(sysconfig.analog_sensor_type[channel])
+		{
+			case FOURTWENTY:
+				current_mA = voltage_mV / CONFIG_CURRENT_LOOP_RECEIVER_RESISTOR;					
+        	    sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %u, \"%s\": %.3f, \"%s\": \"%s\"}", \
+        	        "deviceId", user_mqtt_str, \
+        	        "timestamp", now, \
+					"adc_channel", channel, \
+        	        "adc_reading", current_mA, \
+        	        "unit", "mA");
+				break;
+
+			case RESISTIVE:
+				resistance_ohms = CONFIG_RESISTIVE_DIVIDER / ((3300/voltage_mV) - 1);	// We are assuming that V_SUPPLY is 3.3V				
+        	    sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %u, \"%s\": %.3f, \"%s\": \"%s\"}", \
+        	        "deviceId", user_mqtt_str, \
+        	        "timestamp", now, \
+					"adc_channel", channel, \
+        	        "adc_reading", resistance_ohms, \
+        	        "unit", "ohms");
+				printf("Resistance = %.6f\n ohms", resistance_ohms);
+				break;
+
+			case DIRECT:
+				terminal_voltage_mV = voltage_mV * ((CONFIG_DIRECT_VOLTAGE_RECEIVER_RESISTOR + CONFIG_DIRECT_VOLTAGE_DIVIDER_RESISTOR) / CONFIG_DIRECT_VOLTAGE_RECEIVER_RESISTOR);
+        	    sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %u, \"%s\": %.3f, \"%s\": \"%s\"}", \
+        	        "deviceId", user_mqtt_str, \
+        	        "timestamp", now, \
+					"adc_channel", channel, \
+        	        "adc_reading", terminal_voltage_mV, \
+        	        "unit", "mV");
+				break;
+
+			default:
+				RAAHI_LOGE(TAG, "Encountered unknown analog sensory type for channel %u", channel);
+				continue;			
+		}
+        
+		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+        data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
+		
+	}	
+
+}
+
 
 /* -----------------------------------------------------------
 | 	data_sampling_task
@@ -384,6 +594,7 @@ void data_sampling_task(void *param)
         .rx_flow_ctrl_thresh = 122,
     };
 
+    ESP_ERROR_CHECK(i2c_master_init());
 	while(1) {
 
     	// Configure UART parameters for sampling on MODBUS
@@ -419,6 +630,8 @@ void data_sampling_task(void *param)
 		} else {
 			RAAHI_LOGI(TAG, "UART Driver couldn't be deleted for switching to GPS task");
 		}
+
+		adc_sensor_task();
 
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 	

@@ -854,6 +854,12 @@ void read_sysconfig()
 	default_config.reg_address[1] = CONFIG_SECOND_REG;
 	default_config.reg_address[2] = CONFIG_THIRD_REG;
 	default_config.sampling_period_in_sec = CONFIG_SAMPLING_PERIOD;
+	
+	default_config.analog_sensor_type[0] = NONE;
+	default_config.analog_sensor_type[1] = RESISTIVE;
+	default_config.analog_sensor_type[2] = NONE;
+	default_config.analog_sensor_type[3] = NONE;
+	
 	strcpy(default_config.client_id, CONFIG_AWS_EXAMPLE_CLIENT_ID);
 	strcpy(default_config.topic, CONFIG_MQTT_TOPIC_ROOT);
 	strcpy(default_config.apn, CONFIG_EXAMPLE_MODEM_APN);
