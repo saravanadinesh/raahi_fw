@@ -127,6 +127,7 @@ char HostAddress[255] = AWS_IOT_MQTT_HOST;
 struct config_struct sysconfig;
 struct data_json_struct data_json;
 struct event_json_struct event_json;
+struct query_json_struct query_json;
 struct debug_data_struct debug_data;
 int today, this_hour;
 /**
@@ -501,9 +502,97 @@ void sysconfig_json_write(struct json_struct* parsed_json, uint8_t no_of_items)
 
 }
 
+void create_sysconfig_json(char* json_str, uint16_t json_str_len)
+{
+    struct json_struct sysconfig_json[MAX_SUBSCRIBE_JSON_ITEMS];
+	uint8_t item, no_of_items = 0;
+	uint16_t running_str_len;
+	char tempStr[MAX_KEY_LEN + MAX_VALUE_LEN];  
+  	time_t now;
+
+	time(&now);
+
+	sprintf(sysconfig_json[no_of_items].key, "\"deviceId\"");
+	sprintf(sysconfig_json[no_of_items].value, "\"%s\"", user_mqtt_str);
+	no_of_items++;
+
+	sprintf(sysconfig_json[no_of_items].key, "\"timestamp\"");
+	sprintf(sysconfig_json[no_of_items].value, "%lu", now);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"first_slave_id\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.slave_id[0]);
+	no_of_items++;
+
+	sprintf(sysconfig_json[no_of_items].key, "\"second_slave_id\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.slave_id[1]);
+	no_of_items++;
+
+	sprintf(sysconfig_json[no_of_items].key, "\"first_reg_address\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.reg_address[0]);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"second_reg_address\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.reg_address[1]);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"third_reg_address\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.reg_address[2]);
+	no_of_items++;
+
+	sprintf(sysconfig_json[no_of_items].key, "\"sampling_period_in_sec\"");
+	sprintf(sysconfig_json[no_of_items].value, "%u", sysconfig.sampling_period_in_sec);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"client_id\"");
+	sprintf(sysconfig_json[no_of_items].value, "\"%s\"", sysconfig.client_id);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"topic\"");
+	sprintf(sysconfig_json[no_of_items].value, "\"%s\"", sysconfig.topic);
+	no_of_items++;
+	
+	sprintf(sysconfig_json[no_of_items].key, "\"apn\"");
+	sprintf(sysconfig_json[no_of_items].value, "\"%s\"", sysconfig.apn);
+	no_of_items++;
+	
+	json_str[0] = '\0';
+	strcat(json_str, "{");
+	running_str_len = strlen("{"); 
+	for (item = 0; item < no_of_items; item++)
+	{
+		tempStr[0] = '\0';
+		strcat(tempStr, sysconfig_json[item].key);
+		strcat(tempStr, ": ");
+		strcat(tempStr, sysconfig_json[item].value);
+
+		if (item < no_of_items - 1)
+		{
+			strcat(tempStr, ",");
+		}
+		else
+		{
+			strcat(tempStr, "}");
+		}
+
+		if(running_str_len + strlen(tempStr) < json_str_len)
+		{
+			running_str_len = running_str_len + strlen(tempStr);
+			strcat(json_str, tempStr);
+		}
+		else
+		{
+			RAAHI_LOGE(TAG, "sysconfig json string larger than stipulated size of %u", json_str_len);
+			break;
+		}
+	}
+}
+
 void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
 {
-    if (no_of_items > 2)
+	
+    
+	if (no_of_items > 2)
     {
         RAAHI_LOGE(TAG, "Only one command cand be issued at a time");
     }
@@ -519,6 +608,15 @@ void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
             vTaskDelay(5000/ portTICK_RATE_MS);
             esp_restart();
         }
+        else if(strcmp(parsed_json[1].value, "send_sysconfig") == 0)
+        {
+			char sysconfig_json[QUERY_JSON_STR_SIZE];
+
+ 			create_sysconfig_json(sysconfig_json, QUERY_JSON_STR_SIZE);
+			strcpy(query_json.packet[query_json.write_ptr], sysconfig_json);
+			query_json.write_ptr = (query_json.write_ptr+1) % QUERY_JSON_QUEUE_SIZE;
+			
+		}
         else
         {
             RAAHI_LOGI(TAG, "Unknown command received. No action taken");
@@ -584,12 +682,13 @@ void aws_iot_task(void *param) {
 	char topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char data_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char event_topic[MAX_TOPIC_LEN + 1] = {'\0'};
+	char query_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char subscribe_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 
 
 	char dPayload[DATA_JSON_STR_SIZE] = {'\0'};
 	char ePayload[EVENT_JSON_STR_SIZE] = {'\0'};
- 
+	char qPayload[QUERY_JSON_STR_SIZE] = {'\0'};
 
 	strcat(topic, "/");
 	strcat(topic, CONFIG_MQTT_TOPIC_ROOT); 
@@ -600,12 +699,16 @@ void aws_iot_task(void *param) {
 	strcpy(event_topic, topic);
 	strcat(event_topic, "/event");
 	
+	strcpy(query_topic, topic);
+	strcat(query_topic, "/query");
+	
 	strcpy(subscribe_topic, topic);
 	strcat(subscribe_topic, "/");
 	strcat(subscribe_topic, user_mqtt_str);
 	
 	IoT_Publish_Message_Params dataPacket;
 	IoT_Publish_Message_Params eventPacket;
+	IoT_Publish_Message_Params queryPacket;
 
     IoT_Error_t rc, yield_rc = FAILURE;
 
@@ -701,6 +804,10 @@ void aws_iot_task(void *param) {
     eventPacket.payload = (void *) ePayload;
     eventPacket.isRetained = 0;
 
+    queryPacket.qos = QOS0;
+    queryPacket.payload = (void *) qPayload;
+    queryPacket.isRetained = 0;
+	
 	rc = SUCCESS;
 	uint8_t failures_counter = 0, other_failures_counter = 0;
     while(1) { 
@@ -741,6 +848,21 @@ void aws_iot_task(void *param) {
 		    if (rc == SUCCESS) { 
 				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
 				ESP_LOGI(TAG, "Sent an event json");
+        	}
+		}
+
+		while ((query_json.write_ptr != query_json.read_ptr) && rc == SUCCESS) { // Implies there are unsent mqtt messages
+			strcpy(qPayload, query_json.packet[query_json.read_ptr]);     	
+			queryPacket.payloadLen = strlen(qPayload);
+        	    rc = aws_iot_mqtt_publish(&client, query_topic, strlen(query_topic), &queryPacket);
+        	    if (rc == MQTT_REQUEST_TIMEOUT_ERROR) {
+            	        ESP_LOGW(TAG, "publish ack not received.");
+            	        rc = SUCCESS;
+        	    }
+			
+		    if (rc == SUCCESS) { 
+				query_json.read_ptr = (query_json.read_ptr+1) % QUERY_JSON_QUEUE_SIZE;
+				ESP_LOGI(TAG, "Sent an query json");
         	}
 		}
 
@@ -1006,6 +1128,8 @@ void normal_tasks()
 	data_json.write_ptr = 0;
 	event_json.read_ptr = 0;
 	event_json.write_ptr = 0;
+	query_json.read_ptr = 0;
+	query_json.write_ptr = 0;
 
 	//mqtt_rw_group = xEventGroupCreate();
 	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);

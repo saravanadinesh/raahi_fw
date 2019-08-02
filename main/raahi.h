@@ -6,7 +6,7 @@
 #ifndef _RAAHI_FW_H_
 #define _RAAHI_FW_H_
 
-#define MAX_TOPIC_LEN 30
+#define MAX_TOPIC_LEN 20
 #define MAX_APN_LEN 20
 #define MAX_MODBUS_SLAVES 2
 #define MAX_CLIENT_ID_LEN 20
@@ -17,12 +17,14 @@
 #define DATA_JSON_STR_SIZE 250
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 250
+#define QUERY_JSON_QUEUE_SIZE 5
+#define QUERY_JSON_STR_SIZE 300
 #define MAX_AWS_FAILURE_COUNT 10
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
-#define MAX_SUBSCRIBE_JSON_ITEMS 10
-#define MAX_KEY_LEN 20
-#define MAX_VALUE_LEN 20
+#define MAX_SUBSCRIBE_JSON_ITEMS 15
+#define MAX_KEY_LEN 25
+#define MAX_VALUE_LEN 25
 
 #define RAAHI_LOGE( tag, format, ... ) do {\
 	ESP_LOGE(tag, format, ##__VA_ARGS__);\
@@ -86,6 +88,12 @@ struct data_json_struct {
 
 struct event_json_struct {
 	char packet[EVENT_JSON_QUEUE_SIZE][EVENT_JSON_STR_SIZE];
+	uint8_t read_ptr;
+	uint8_t write_ptr;
+};
+
+struct query_json_struct {
+	char packet[QUERY_JSON_QUEUE_SIZE][QUERY_JSON_STR_SIZE];
 	uint8_t read_ptr;
 	uint8_t write_ptr;
 };

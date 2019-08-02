@@ -24,6 +24,7 @@ extern struct config_struct sysconfig;
 extern struct debug_data_struct debug_data;
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
+extern void create_sysconfig_json(char* json_str, uint16_t json_str_len);
 
 // Function declarations
 extern void display_sysconfig();
@@ -155,13 +156,39 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 	return(ESP_OK);
 }
 
+
 static const httpd_uri_t infopage = {
     .uri       = "/info",
     .method    = HTTP_GET,
     .handler   = infopage_get_handler,
     /* Let's pass response string in user
      * context to demonstrate it's usage */
-    .user_ctx  = "Info Page"
+    .user_ctx  = NULL
+};
+
+
+/* -----------------------------------------------------------
+| 	config_get_handler()
+|	HTTP server side handler for GET reuests on /sysconfig
+------------------------------------------------------------*/
+static esp_err_t config_get_handler(httpd_req_t *req)
+{
+	char sysconfig_json[QUERY_JSON_STR_SIZE];
+
+ 	create_sysconfig_json(sysconfig_json, QUERY_JSON_STR_SIZE);
+	httpd_resp_sendstr_chunk(req, sysconfig_json);
+	httpd_resp_sendstr_chunk(req, NULL);
+	return(ESP_OK);
+	
+}
+
+static const httpd_uri_t sysconfig_get = {
+    .uri       = "/sysconfig",
+    .method    = HTTP_GET,
+    .handler   = config_get_handler,
+    /* Let's pass response string in user
+     * context to demonstrate it's usage */
+    .user_ctx  = NULL
 };
 
 /* -----------------------------------------------------------
@@ -389,6 +416,7 @@ httpd_handle_t start_webserver(void)
         RAAHI_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &homepage);
         httpd_register_uri_handler(server, &infopage);
+        httpd_register_uri_handler(server, &sysconfig_get);
 		httpd_register_uri_handler(server, &favicon_ico);
 		httpd_register_uri_handler(server, &submit);
 			
