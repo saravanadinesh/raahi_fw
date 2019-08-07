@@ -978,11 +978,11 @@ void read_sysconfig()
 	default_config.sampling_period_in_sec = CONFIG_SAMPLING_PERIOD;
 	
 	default_config.analog_sensor_type[0] = NONE;
-	default_config.analog_sensor_type[1] = RESISTIVE;
+	default_config.analog_sensor_type[1] = NONE;
 	default_config.analog_sensor_type[2] = NONE;
 	default_config.analog_sensor_type[3] = NONE;
 	
-	strcpy(default_config.client_id, CONFIG_AWS_EXAMPLE_CLIENT_ID);
+	strcpy(default_config.client_id, "raahi_new");
 	strcpy(default_config.topic, CONFIG_MQTT_TOPIC_ROOT);
 	strcpy(default_config.apn, CONFIG_EXAMPLE_MODEM_APN);
 
@@ -1009,6 +1009,7 @@ void read_sysconfig()
 			ESP_LOGI(TAG, "Successfully read sysconfig.txt contents into internal variable");
 			// Display what was read
 			display_sysconfig();
+			fclose(config_file);
 		}
 	}
 }
@@ -1069,7 +1070,7 @@ void mobile_radio_init()
     ESP_LOGI(TAG, "IMSI: %s", dce_g->imsi);
     /* Get signal quality */
     uint32_t rssi = 0, ber = 0;
-    dce_g->get_signal_quality(dce_g, &rssi, &ber);
+    ESP_ERROR_CHECK(dce_g->get_signal_quality(dce_g, &rssi, &ber));
     ESP_LOGI(TAG, "rssi: %u, ber: %u", rssi, ber);
 	
 	strcpy(debug_data.imei, dce_g->imei);
@@ -1079,7 +1080,7 @@ void mobile_radio_init()
 
     /* Get battery voltage */
     uint32_t voltage = 0, bcs = 0, bcl = 0;
-    dce_g->get_battery_status(dce_g, &bcs, &bcl, &voltage);
+    ESP_ERROR_CHECK(dce_g->get_battery_status(dce_g, &bcs, &bcl, &voltage));
     ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
 	debug_data.battery_voltage = voltage;	
 
@@ -1110,6 +1111,8 @@ void mobile_radio_init()
 void normal_tasks()
 {
     static httpd_handle_t http_server = NULL;
+	static const char* config_file_name = "/spiffs/sysconfig.txt";
+	FILE* config_file = NULL;
 
 	getMacAddress(user_mqtt_str); // Mac address is used as a unique id of the device in json packets.
 
@@ -1139,6 +1142,22 @@ void normal_tasks()
 	
 	mobile_radio_init();
 
+	if(strcmp(sysconfig.client_id, dce_g->imei) != 0) // This happens just once after erase_flash
+	{
+		strcpy(sysconfig.client_id, dce_g->imei);
+		
+        display_sysconfig(); // so that we will know in AWS if the changes have indeed taken place
+	    config_file = fopen(config_file_name, "wb");
+
+	    if(fwrite(&sysconfig, sizeof(struct config_struct), 1, config_file) != 1) {
+	    	RAAHI_LOGE(TAG, "Couldn't update sysconfig file although it is present");
+	    	abort();
+	    } else {
+	    	RAAHI_LOGI(TAG, "Successfully updated sysconfig file");
+	    }
+	    fclose(config_file);
+	}
+ 
     xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 1);
 }

@@ -150,9 +150,9 @@ menu "Example Configuration"
 				Second register to read
 
 		config THIRD_REG
-			int "Third register to read"
+			int "Third modbus register to read"
 			range 0 65535
-			default 216
+			default 212
 			help
 				Third register to read
 		
@@ -240,12 +240,6 @@ menu "Example Configuration"
 		default "Sapcon"
 		help
 			A string without slashes that will be used as head topic
-
-    config AWS_EXAMPLE_CLIENT_ID
-        string "AWS IoT Client ID"
-        default "myesp32"
-        help
-            AWS IoT Client ID for the example. Should be unique for every device.
 
     choice EXAMPLE_CERT_SOURCE
         prompt "AWS IoT Certificate Source"

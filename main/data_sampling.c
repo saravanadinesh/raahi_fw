@@ -26,7 +26,7 @@
 #define MODBUS_RTS   (21)
 #define MODBUS_CTS  UART_PIN_NO_CHANGE
 // GPS receiver related Defines
-#define GPS_TASK_TXD   (26)
+#define GPS_TASK_TXD   (19)
 #define GPS_TASK_RXD   (27)
 #define GPS_TASK_RTS  UART_PIN_NO_CHANGE
 #define GPS_TASK_CTS  UART_PIN_NO_CHANGE
@@ -630,7 +630,7 @@ void data_sampling_task(void *param)
 			RAAHI_LOGI(TAG, "UART Driver couldn't be deleted for switching to GPS task");
 		}
 
-		adc_sensor_task();
+		//adc_sensor_task();
 
         vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 	
