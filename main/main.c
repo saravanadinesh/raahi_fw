@@ -425,10 +425,8 @@ static httpd_handle_t start_ota_webserver(void)
 ------------------------------------------------------------*/
 static void ota_task()
 {
-    static httpd_handle_t ota_http_server = NULL;
-	
 	// Get the homepage up: Initialize webserver, register all handlers
-    ota_http_server = start_ota_webserver();
+    start_ota_webserver();
     	 	
 }
 

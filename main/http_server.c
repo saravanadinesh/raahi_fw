@@ -28,6 +28,7 @@ extern void create_sysconfig_json(char* json_str, uint16_t json_str_len);
 
 // Function declarations
 extern void display_sysconfig();
+int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len);
 
 /* -----------------------------------------------------------
 | 	homepage_get_handler()
@@ -128,6 +129,28 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 	sprintf(tempStr, "\t\t<tr><td>Battery Voltage</td><td>%u</td></tr>\n", debug_data.battery_voltage);
 	httpd_resp_sendstr_chunk(req, tempStr);
 	
+	tempStr[0] = '\0';
+	if(debug_data.connected_to_internet == true)
+	{
+		sprintf(tempStr, "\t\t<tr><td>Connected to internet:</td><td>%s</td></tr>\n", "Yes");
+	}
+	else
+	{
+		sprintf(tempStr, "\t\t<tr><td>Connected to internet:</td><td>%s</td></tr>\n", "No");
+	}
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
+	tempStr[0] = '\0';
+	if(debug_data.connected_to_aws == true)
+	{
+		sprintf(tempStr, "\t\t<tr><td>Connected to AWS:</td><td>%s</td></tr>\n", "Yes");
+	}
+	else
+	{
+		sprintf(tempStr, "\t\t<tr><td>Connected to AWS:</td><td>%s</td></tr>\n", "No");
+	}
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
 		if (sysconfig.slave_id[slave_id_idx] == 0) {// Slave ID of 0 is considered to be an uninitialized entry
@@ -191,43 +214,6 @@ static const httpd_uri_t sysconfig_get = {
     .user_ctx  = NULL
 };
 
-/* -----------------------------------------------------------
-| 	str2num()
-| 	Converts a number in the form of a string to numerical data
-| 	type. 
-| 	WARNING: The numbers represented as characters are expected
-|	to be decimal values. i.e., hex is not allowed
-------------------------------------------------------------*/
-int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len)
-{
-	uint8_t index = 0;
-	int32_t result = 0; // TODO: Re-examine. 0 could be a legit input
-
-	while(index < max_parse_len)
-	{
-		if(input_str[index] == delimiter) {
-			break;
-		}
-		
-		if((uint8_t)input_str[index] > 57 || (uint8_t)input_str[index] < 48) {//If the character is not even a number
-			RAAHI_LOGI(TAG, "String entered has non (decimal) numbers");
-			return (-1);
-		}  
-		
-		result = result*10 + (input_str[index] - 48);
-		index++;
-	}
-
-	if (index == max_parse_len) { // Delimiter wasn't detected
-		RAAHI_LOGI(TAG, "Delimiter wasn't detected");
-		return(-1);
-	}
-	if (index == 0) { // User didn't enter any value
-		return(-1);
-	}
-	
-	return result;
-}
 
 /* -----------------------------------------------------------
 | 	update_sysconfig()

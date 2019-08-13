@@ -317,7 +317,6 @@ void modbus_sensor_task()
 
 
 void parse_gpgll(float *gps_lat,float *gps_lng, char *gpgll_line) {
-  char *ptr = gpgll_line;
   *gps_lat = floor(strtof(gpgll_line+6,NULL)/100)+strtof(gpgll_line+8,NULL)/60;
   *gps_lng = floor(strtof(gpgll_line+19,NULL)/100)+strtof(gpgll_line+22,NULL)/60;
   if(gpgll_line[17] == 'S') {
@@ -350,7 +349,6 @@ void gps_sampling_task()
     	const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
     	if (rxBytes > 0) {
 			data[rxBytes] = 0;
-    		bool valid = true;
     		char *ptr = strstr((char*)data, "GPGLL");
 	    	if (ptr != NULL) /* Substring found */
 	    	{

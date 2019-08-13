@@ -6,7 +6,7 @@
 #ifndef _RAAHI_FW_H_
 #define _RAAHI_FW_H_
 
-#define MAX_TOPIC_LEN 20
+#define MAX_TOPIC_LEN 30
 #define MAX_APN_LEN 20
 #define MAX_MODBUS_SLAVES 2
 #define MAX_CLIENT_ID_LEN 20
@@ -26,6 +26,7 @@
 #define MAX_KEY_LEN 25
 #define MAX_VALUE_LEN 25
 
+char raahi_log_str[EVENT_JSON_STR_SIZE];
 #define RAAHI_LOGE( tag, format, ... ) do {\
 	ESP_LOGE(tag, format, ##__VA_ARGS__);\
 	sprintf(raahi_log_str, format, ##__VA_ARGS__);\
@@ -68,7 +69,21 @@ void compose_mqtt_event(const char *TAG, char *msg);
 
 // Data type definitions
 enum adc_port_type {NONE = 0, FOURTWENTY, RESISTIVE, DIRECT};
- 
+
+enum led_colour
+{
+	NOCOLOUR = 0,
+	RED,
+	BLUE,
+	GREEN,
+};
+
+typedef struct{
+	enum led_colour colour;
+	bool blink;
+	uint8_t blink_rate_in_ms;
+} status_led_struct;
+  
 struct config_struct {
 	uint8_t slave_id[MAX_MODBUS_SLAVES];
 	uint16_t reg_address[MAX_MODBUS_REGISTERS];
@@ -117,6 +132,8 @@ struct debug_data_struct {
 	uint32_t ber;
 	uint32_t battery_voltage;
 	struct slave_info_struct slave_info[MAX_MODBUS_SLAVES];
+	bool connected_to_internet;
+	bool connected_to_aws;
 };
 
 struct json_struct {
