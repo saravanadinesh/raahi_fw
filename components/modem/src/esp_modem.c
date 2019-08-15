@@ -37,6 +37,7 @@
  *
  */
 static const char *MODEM_TAG = "esp-modem";
+extern uint8_t modem_failures_counter;
 #define MODEM_CHECK(a, str, goto_tag, ...)                                              \
     do                                                                                  \
     {                                                                                   \
@@ -89,6 +90,7 @@ err_handle:
     esp_event_post_to(esp_dte->event_loop_hdl, ESP_MODEM_EVENT, MODEM_EVENT_UNKNOWN,
                       (void *)line, strlen(line) + 1, pdMS_TO_TICKS(100));
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -215,6 +217,7 @@ static esp_err_t esp_modem_dte_send_cmd(modem_dte_t *dte, const char *command, u
     MODEM_CHECK(xSemaphoreTake(esp_dte->process_sem, pdMS_TO_TICKS(timeout)) == pdTRUE, "process command timeout", err);
     ret = ESP_OK;
 err:
+	modem_failures_counter++;
     dce->handle_line = NULL;
     return ret;
 }
@@ -233,6 +236,7 @@ static int esp_modem_dte_send_data(modem_dte_t *dte, const char *data, uint32_t 
     esp_modem_dte_t *esp_dte = __containerof(dte, esp_modem_dte_t, parent);
     return uart_write_bytes(esp_dte->uart_port, data, length);
 err:
+	modem_failures_counter++;
     return -1;
 }
 
@@ -271,6 +275,7 @@ err:
 err_write:
     uart_enable_pattern_det_intr(esp_dte->uart_port, '\n', 1, MIN_PATTERN_INTERVAL, MIN_POST_IDLE, MIN_PRE_IDLE);
 err_param:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -307,6 +312,7 @@ static esp_err_t esp_modem_dte_change_mode(modem_dte_t *dte, modem_mode_t new_mo
     }
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -429,6 +435,7 @@ err_uart_config:
 err_line_mem:
     free(esp_dte);
 err_dte_mem:
+	modem_failures_counter++;
     return NULL;
 }
 
@@ -607,6 +614,7 @@ esp_err_t esp_modem_setup_ppp(modem_dte_t *dte)
     esp_event_post_to(esp_dte->event_loop_hdl, ESP_MODEM_EVENT, MODEM_EVENT_PPP_START, NULL, 0, 0);
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -623,5 +631,6 @@ esp_err_t esp_modem_exit_ppp(modem_dte_t *dte)
     MODEM_CHECK(dce->hang_up(dce) == ESP_OK, "hang up failed", err);
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }

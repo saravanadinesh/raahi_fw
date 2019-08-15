@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 
+#include "esp_modem.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "raahi.h"
@@ -21,6 +22,17 @@
 static const char *TAG = "utilities";
 extern struct config_struct sysconfig;
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
+extern modem_dte_t *dte_g;
+
+/* -----------------------------------------------------------
+| 	raahi_restart()
+|   Restarts ESP properly for the Raahi device 
+------------------------------------------------------------*/
+void raahi_restart()
+{
+	dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
+	esp_restart();
+}
 
 /* -----------------------------------------------------------
 | 	set_status_LED(status_led_struct)

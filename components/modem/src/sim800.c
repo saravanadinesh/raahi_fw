@@ -43,6 +43,8 @@ typedef struct {
     modem_dce_t parent;  /*!< DCE parent class */
 } sim800_modem_dce_t;
 
+extern uint8_t modem_failures_counter;
+
 /**
  * @brief Handle response from AT+CSQ
  */
@@ -250,6 +252,7 @@ static esp_err_t sim800_get_signal_quality(modem_dce_t *dce, uint32_t *rssi, uin
     ESP_LOGD(DCE_TAG, "inquire signal quality ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -276,6 +279,7 @@ static esp_err_t sim800_get_battery_status(modem_dce_t *dce, uint32_t *bcs, uint
     ESP_LOGD(DCE_TAG, "inquire battery status ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -313,6 +317,7 @@ static esp_err_t sim800_set_working_mode(modem_dce_t *dce, modem_mode_t mode)
     }
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -333,6 +338,7 @@ static esp_err_t sim800_power_down(modem_dce_t *dce)
     ESP_LOGD(DCE_TAG, "power down ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -353,6 +359,7 @@ static esp_err_t sim800_get_module_name(sim800_modem_dce_t *sim800_dce)
     ESP_LOGD(DCE_TAG, "get module name ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -373,6 +380,7 @@ static esp_err_t sim800_get_imei_number(sim800_modem_dce_t *sim800_dce)
     ESP_LOGD(DCE_TAG, "get imei number ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -393,6 +401,7 @@ static esp_err_t sim800_get_imsi_number(sim800_modem_dce_t *sim800_dce)
     ESP_LOGD(DCE_TAG, "get imsi number ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -413,6 +422,7 @@ static esp_err_t sim800_get_operator_name(sim800_modem_dce_t *sim800_dce)
     ESP_LOGD(DCE_TAG, "get network operator ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -472,5 +482,6 @@ modem_dce_t *sim800_init(modem_dte_t *dte)
 err_io:
     free(sim800_dce);
 err:
+	modem_failures_counter++;
     return NULL;
 }

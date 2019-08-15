@@ -20,6 +20,7 @@
  *
  */
 static const char *DCE_TAG = "dce_service";
+extern uint8_t modem_failures_counter;
 #define DCE_CHECK(a, str, goto_tag, ...)                                              \
     do                                                                                \
     {                                                                                 \
@@ -50,6 +51,7 @@ esp_err_t esp_modem_dce_sync(modem_dce_t *dce)
     ESP_LOGD(DCE_TAG, "sync ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -68,6 +70,7 @@ esp_err_t esp_modem_dce_echo(modem_dce_t *dce, bool on)
     }
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -80,6 +83,7 @@ esp_err_t esp_modem_dce_store_profile(modem_dce_t *dce)
     ESP_LOGD(DCE_TAG, "save settings ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -95,6 +99,7 @@ esp_err_t esp_modem_dce_set_flow_ctrl(modem_dce_t *dce, modem_flow_ctrl_t flow_c
     ESP_LOGD(DCE_TAG, "set flow control ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -110,6 +115,7 @@ esp_err_t esp_modem_dce_define_pdp_context(modem_dce_t *dce, uint32_t cid, const
     ESP_LOGD(DCE_TAG, "define pdp context ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }
 
@@ -122,5 +128,6 @@ esp_err_t esp_modem_dce_hang_up(modem_dce_t *dce)
     ESP_LOGD(DCE_TAG, "hang up ok");
     return ESP_OK;
 err:
+	modem_failures_counter++;
     return ESP_FAIL;
 }

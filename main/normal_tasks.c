@@ -78,12 +78,15 @@ const int SNTP_CONNECT_BIT = BIT0;
 //const int WRITE_OP_DONE = BIT1;
 
 static const char *TAG = "normal_task";
-static modem_dte_t *dte_g;
+modem_dte_t *dte_g;
 static modem_dce_t *dce_g;
 
 char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 
-
+//Failure Counters
+uint8_t aws_failures_counter = 0, other_aws_failures_counter = 0;
+uint8_t modem_failures_counter = 0;
+time_t last_publish_timestamp = 0;
 /* The event group allows multiple bits for each event,
    but we only care about one event - are we connected
    to the AP with an IP? */
@@ -146,7 +149,7 @@ int today, this_hour;
 uint32_t port = AWS_IOT_MQTT_PORT;
 static void obtain_time(void);
 static void initialize_sntp(void);
-
+extern void raahi_restart(void);
 
 
 void time_sync_notification_cb(struct timeval *tv)
@@ -327,7 +330,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 		debug_data.connected_to_internet = false;
 		// Restart modem
         vTaskDelay(1000/portTICK_RATE_MS);
-		abort();
+		raahi_restart();
 		break;
     case MODEM_EVENT_PPP_STOP:
         RAAHI_LOGI(TAG, "Modem PPP Stopped");
@@ -344,8 +347,6 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 
 void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
 {
-	
-    
 	if (no_of_items > 2)
     {
         RAAHI_LOGE(TAG, "Only one command cand be issued at a time");
@@ -360,7 +361,7 @@ void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
         {
             RAAHI_LOGI(TAG, "Restart command received. Restarting in 5 seconds");
             vTaskDelay(5000/ portTICK_RATE_MS);
-            esp_restart();
+            raahi_restart();
         }
         else if(strcmp(parsed_json[1].value, "send_sysconfig") == 0)
         {
@@ -567,7 +568,6 @@ void aws_iot_task(void *param) {
     queryPacket.isRetained = 0;
 	
 	rc = SUCCESS;
-	uint8_t failures_counter = 0, other_failures_counter = 0;
     while(1) { 
 		//Max time the yield function will wait for read messages
         yield_rc = aws_iot_mqtt_yield(&client, 15000);
@@ -589,6 +589,7 @@ void aws_iot_task(void *param) {
 			
 		    if (rc == SUCCESS) { 
 		        data_json.read_ptr = (data_json.read_ptr+1) % DATA_JSON_QUEUE_SIZE;
+				time(&last_publish_timestamp); // Update last publish timestamp
 				ESP_LOGI(TAG, "Sent a data json");
 		    }
 			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
@@ -605,6 +606,7 @@ void aws_iot_task(void *param) {
 			
 		    if (rc == SUCCESS) { 
 				event_json.read_ptr = (event_json.read_ptr+1) % EVENT_JSON_QUEUE_SIZE;
+				time(&last_publish_timestamp); // Update last publish timestamp
 				ESP_LOGI(TAG, "Sent an event json");
         	}
 		}
@@ -620,6 +622,7 @@ void aws_iot_task(void *param) {
 			
 		    if (rc == SUCCESS) { 
 				query_json.read_ptr = (query_json.read_ptr+1) % QUERY_JSON_QUEUE_SIZE;
+				time(&last_publish_timestamp); // Update last publish timestamp
 				ESP_LOGI(TAG, "Sent an query json");
         	}
 		}
@@ -629,8 +632,9 @@ void aws_iot_task(void *param) {
 			case SUCCESS:
         	case NETWORK_RECONNECTED:		
 			case NETWORK_PHYSICAL_LAYER_CONNECTED:
-				failures_counter = 0;
-				other_failures_counter = 0;	
+				aws_failures_counter = 0;
+				other_aws_failures_counter = 0;	
+				modem_failures_counter = 0;
 				debug_data.connected_to_aws = true;
 				debug_data.connected_to_internet = true;
         		//ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
@@ -646,11 +650,7 @@ void aws_iot_task(void *param) {
 				break;
 
 			case FAILURE:
-				failures_counter++;
-				if (failures_counter > MAX_AWS_FAILURE_COUNT) {
-    				ESP_LOGE(TAG, "Too many failures in AWS loop. rc = %d", rc);
-					abort();
-				}
+				aws_failures_counter++;
 				vTaskDelay(1000/portTICK_RATE_MS);
 				rc = SUCCESS;
 				break;
@@ -664,12 +664,8 @@ void aws_iot_task(void *param) {
     			abort();
 
 			default:
-				other_failures_counter++;
+				other_aws_failures_counter++;
 				RAAHI_LOGE(TAG, "General failure occurred. rc = %d", rc);
-				if (other_failures_counter > MAX_AWS_FAILURE_COUNT) { 
-    				ESP_LOGE(TAG, "Too many other failures in AWS loop. Last rc = %d", rc);
-					abort();
-				}
 				vTaskDelay(1000/portTICK_RATE_MS);
 				rc = SUCCESS;
 				break;
@@ -697,7 +693,7 @@ void mobile_radio_init()
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
-			abort();
+			esp_restart();
 		}	
 	}
 
@@ -714,10 +710,10 @@ void mobile_radio_init()
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
-			abort();
+			esp_restart();
 		}	
 	}
-
+	dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
     ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce_g->store_profile(dce_g));
     /* Print Module ID, Operator, IMEI, IMSI */
@@ -798,7 +794,7 @@ void normal_tasks()
 	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
-	xTaskCreate(data_sampling_task, "data_sampling_task", 8192, NULL, 10, NULL);	
+	xTaskCreatePinnedToCore(&data_sampling_task, "data_sampling_task", 8192, NULL, 10, NULL, 1);	
 	
 	mobile_radio_init();
 
@@ -819,5 +815,5 @@ void normal_tasks()
 	}
  
     xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 1);
+    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 0);
 }

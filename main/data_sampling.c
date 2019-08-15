@@ -153,6 +153,13 @@ extern struct event_json_struct event_json;
 extern struct debug_data_struct debug_data;
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
 
+extern uint8_t aws_failures_counter;
+extern uint8_t other_aws_failures_counter;
+extern uint8_t modem_failures_counter;
+extern time_t last_publish_timestamp;
+
+// External functions
+extern void raahi_restart(void);
 
 /********************************************************************/
 /* Actual code starts here */
@@ -641,10 +648,31 @@ void data_sampling_task(void *param)
 				today = timeinfo.tm_mday;
 				RAAHI_LOGI(TAG, "Restarting in 10 sec since 24hrs have passed");
 				vTaskDelay(1000/portTICK_RATE_MS);
-				abort();
+				esp_restart();
 			}
 		}
+
+		// Check if any error counters have crossed their respective thresholds and restart if so
+		if (aws_failures_counter > MAX_AWS_FAILURE_COUNT) {
+    		ESP_LOGE(TAG, "Too many failures in AWS loop");
+			raahi_restart();
+		}
 	
+		if (other_aws_failures_counter > MAX_AWS_FAILURE_COUNT) { 
+    		ESP_LOGE(TAG, "Too many other failures in AWS loop");
+			raahi_restart();
+		}
+		
+		if (modem_failures_counter > MAX_MODEM_FAILURE_COUNT) { 
+    		ESP_LOGE(TAG, "Too many modem failures");
+			raahi_restart();
+		}
+
+		if (last_publish_timestamp !=0 && (now - last_publish_timestamp) > MAX_MQTT_FAIL_TIME) // This is just an extra check. usually checks above this should obviate this	
+		{
+			ESP_LOGE(TAG, "MQTT hasn't sent a message in a long time.");
+			raahi_restart();
+		}
 	}// End of infinite while loop		
   	
 }

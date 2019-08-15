@@ -19,7 +19,9 @@
 #define EVENT_JSON_STR_SIZE 250
 #define QUERY_JSON_QUEUE_SIZE 5
 #define QUERY_JSON_STR_SIZE 300
-#define MAX_AWS_FAILURE_COUNT 10
+#define MAX_AWS_FAILURE_COUNT (uint8_t)10
+#define MAX_MODEM_FAILURE_COUNT (uint8_t)20
+#define MAX_MQTT_FAIL_TIME (time_t)180 // seconds
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */
 #define MODEM_IMEI_LENGTH (15)         /*!< IMEI Number Length */
 #define MAX_SUBSCRIBE_JSON_ITEMS 15
