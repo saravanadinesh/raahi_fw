@@ -79,7 +79,7 @@ const int SNTP_CONNECT_BIT = BIT0;
 
 static const char *TAG = "normal_task";
 modem_dte_t *dte_g;
-static modem_dce_t *dce_g;
+modem_dce_t *dce_g;
 
 char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 
@@ -638,7 +638,6 @@ void aws_iot_task(void *param) {
 				debug_data.connected_to_aws = true;
 				debug_data.connected_to_internet = true;
         		//ESP_LOGI(TAG, "Stack remaining for task '%s' is %d bytes", pcTaskGetTaskName(NULL), uxTaskGetStackHighWaterMark(NULL));
-        		vTaskDelay((sysconfig.sampling_period_in_sec * 1000) / portTICK_RATE_MS);
 				break; // End of case SUCCESS: ...
 	
 			case NETWORK_ATTEMPTING_RECONNECT:
@@ -713,7 +712,11 @@ void mobile_radio_init()
 			esp_restart();
 		}	
 	}
-	dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
+    
+    dce_g->set_working_mode(dce_g, MODEM_COMMAND_MODE); // This is to ensure that modem is in command mode before proceeding
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+	
+    //dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
     ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce_g->store_profile(dce_g));
     /* Print Module ID, Operator, IMEI, IMSI */
@@ -773,7 +776,7 @@ void normal_tasks()
 	
 	ESP_LOGI(TAG, "Waiting 10 sec for the modem to warm up");
 	vTaskDelay(10000 / portTICK_PERIOD_MS);
-	
+    
     modem_event_group = xEventGroupCreate();
     esp_event_group = xEventGroupCreate();
 

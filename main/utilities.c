@@ -22,17 +22,8 @@
 static const char *TAG = "utilities";
 extern struct config_struct sysconfig;
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
-extern modem_dte_t *dte_g;
 
-/* -----------------------------------------------------------
-| 	raahi_restart()
-|   Restarts ESP properly for the Raahi device 
-------------------------------------------------------------*/
-void raahi_restart()
-{
-	dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
-	esp_restart();
-}
+extern void raahi_restart(void);
 
 /* -----------------------------------------------------------
 | 	set_status_LED(status_led_struct)
@@ -380,7 +371,7 @@ void sysconfig_json_write(struct json_struct* parsed_json, uint8_t no_of_items)
 	    if(client_id_updated == true) {
 	    	ESP_LOGI(TAG, "Client ID updated. So restarting");
            	vTaskDelay(5000 / portTICK_RATE_MS);
-	    	esp_restart();
+	    	raahi_restart();
 	    }
     }
 

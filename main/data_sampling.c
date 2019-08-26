@@ -17,6 +17,8 @@
 #include "driver/uart.h"
 #include "driver/i2c.h"
 #include "esp32/rom/gpio.h"
+#include "esp_modem.h"
+#include "sim800.h"
 #include "raahi.h"
 #include "esp_sntp.h"
 
@@ -92,7 +94,13 @@ extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 extern EventGroupHandle_t esp_event_group;
 extern const int SNTP_CONNECT_BIT;
 extern int today, this_hour;
+extern modem_dte_t *dte_g;
+extern modem_dce_t *dce_g;
 
+/* Function Definitions */
+void raahi_restart(void);
+
+/* Global variables */
 static const uint8_t aucCRCHi[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40,
@@ -158,8 +166,7 @@ extern uint8_t other_aws_failures_counter;
 extern uint8_t modem_failures_counter;
 extern time_t last_publish_timestamp;
 
-// External functions
-extern void raahi_restart(void);
+
 
 /********************************************************************/
 /* Actual code starts here */
@@ -346,69 +353,62 @@ void gps_sampling_task()
 	static const char *RX_TASK_TAG = "GPS SAMPLING TASK";
     time_t now;
     esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
-	uint8_t count;
       
     char cPayload[DATA_JSON_STR_SIZE];
     uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE+1);
     
-	for (count = 0; count <5; count++)
-	{
-    	const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
-    	if (rxBytes > 0) {
-			data[rxBytes] = 0;
-    		char *ptr = strstr((char*)data, "GPGLL");
-	    	if (ptr != NULL) /* Substring found */
-	    	{
-        		char *gpgll_line, *gpgll_start;
-        		gpgll_line = (char*) malloc(GPGLL_LEN+1);
-        		gpgll_start=gpgll_line;
-        		/*copy GPGLL line */
-        		uint8_t cntr = 0 ; 
-        		while ((ptr != NULL) && (*ptr != '*') && (cntr < 7)) {
-        		   *gpgll_start = *ptr;
-        		   if (*ptr == ',') {
-        		     ++cntr;
-        		   }
-        		   ++gpgll_start, ++ptr;
-        		}
-				*gpgll_start = '\0'; 
-        		ESP_LOGI(RX_TASK_TAG, "GPGLL line '%s': size: %d",gpgll_line,strlen(gpgll_line));
-        	  	char valid = gpgll_line[strlen(gpgll_line)-2];
-        	  	if (valid == 'V') {
-        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Void line '%s'",gpgll_line);
-        	    	free(gpgll_line);
-        	    	gpgll_start = NULL;
-        	  	} else if (valid == 'A') {
-        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Active line '%s'",gpgll_line);
-        	   		float gps_lat, gps_lng;
-        	   		parse_gpgll(&gps_lat, &gps_lng, gpgll_line); 
-        	   		time(&now);
-        	   		ESP_LOGI(RX_TASK_TAG, "GPGLL lat:'%.5f' lng:'%.5f'",gps_lat,gps_lng);
-        	   		if (user_mqtt_str != NULL) {
-        	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
-        	                "deviceId", user_mqtt_str, \
-        	                "timestamp", now, \
-        	                "lat", gps_lat, \
-        	                "lng", gps_lng);
-        	   		} else {
-        	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
-        	                "deviceId", "user_id_NA", \
-        	                "timestamp", now, \
-        	                "lat", gps_lat, \
-        	                "lng", gps_lng);
-        	   		}
+    const int rxBytes = uart_read_bytes(DATA_SAMPLING_UART, data, RX_BUF_SIZE, 1000 / portTICK_RATE_MS);
+    if (rxBytes > 0) {
+		data[rxBytes] = 0;
+    	char *ptr = strstr((char*)data, "GPGLL");
+		if (ptr != NULL) /* Substring found */
+		{
+    		char *gpgll_line, *gpgll_start;
+    		gpgll_line = (char*) malloc(GPGLL_LEN+1);
+    		gpgll_start=gpgll_line;
+    		/*copy GPGLL line */
+    		uint8_t cntr = 0 ; 
+    		while ((ptr != NULL) && (*ptr != '*') && (cntr < 7)) {
+    		   *gpgll_start = *ptr;
+    		   if (*ptr == ',') {
+    		     ++cntr;
+    		   }
+    		   ++gpgll_start, ++ptr;
+    		}
+			*gpgll_start = '\0'; 
+    		ESP_LOGI(RX_TASK_TAG, "GPGLL line '%s': size: %d",gpgll_line,strlen(gpgll_line));
+    	  	char valid = gpgll_line[strlen(gpgll_line)-2];
+    	  	if (valid == 'V') {
+    	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Void line '%s'",gpgll_line);
+    	    	free(gpgll_line);
+    	    	gpgll_start = NULL;
+    	  	} else if (valid == 'A') {
+    	   		ESP_LOGI(RX_TASK_TAG, "GPGLL Active line '%s'",gpgll_line);
+    	   		float gps_lat, gps_lng;
+    	   		parse_gpgll(&gps_lat, &gps_lng, gpgll_line); 
+    	   		time(&now);
+    	   		ESP_LOGI(RX_TASK_TAG, "GPGLL lat:'%.5f' lng:'%.5f'",gps_lat,gps_lng);
+    	   		if (user_mqtt_str != NULL) {
+    	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+    	                "deviceId", user_mqtt_str, \
+    	                "timestamp", now, \
+    	                "lat", gps_lat, \
+    	                "lng", gps_lng);
+    	   		} else {
+    	      		sprintf(cPayload, "{\"%s\": \"%s\", \"%s\": %lu, \"%s\": %.6f, \"%s\": %.6f}", \
+    	                "deviceId", "user_id_NA", \
+    	                "timestamp", now, \
+    	                "lat", gps_lat, \
+    	                "lng", gps_lng);
+    	   		}
 
-        	   		strcpy(data_json.packet[data_json.write_ptr], cPayload);
-        	   		data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
-        	   		/* parse line to extract location */
-        	  	}
-				break;
-	    	} // End of if (ptr != NULL)
-		} // End of if (rxBytes > 0) 
-		
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-	} // end of for loop
+    	   		strcpy(data_json.packet[data_json.write_ptr], cPayload);
+    	   		data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
+    	   		/* parse line to extract location */
+    	  	}
+		} // End of if (ptr != NULL)
+	} // End of if (rxBytes > 0) 
+	
 
     free(data);
     return;
@@ -645,10 +645,9 @@ void data_sampling_task(void *param)
 			time(&now);
     		localtime_r(&now, &timeinfo);
 			if (timeinfo.tm_mday != today) {
-				today = timeinfo.tm_mday;
-				RAAHI_LOGI(TAG, "Restarting in 10 sec since 24hrs have passed");
-				vTaskDelay(1000/portTICK_RATE_MS);
-				esp_restart();
+				today = timeinfo.tm_mday; // TODO: Is this even necessary?
+				ESP_LOGI(TAG, "Restarting since 24hrs have passed");
+				raahi_restart();
 			}
 		}
 
@@ -677,3 +676,30 @@ void data_sampling_task(void *param)
   	
 }
 
+/* -----------------------------------------------------------
+| 	raahi_restart()
+|   Restarts ESP properly for the Raahi device 
+------------------------------------------------------------*/
+void raahi_restart()
+{
+    if(dce_g != NULL && dte_g != NULL)
+    {
+        // Stop PPP, switch dte, dce to command mode and sample signal parameters
+        if(dce_g->mode == MODEM_PPP_MODE) // This check is required when change to PPP mode (below) doesn't work
+        {   
+            if(esp_modem_exit_ppp(dte_g) == ESP_FAIL)
+            {   
+                ESP_LOGE(TAG, "Changing to command mode failed");
+            }   
+            else
+            {   
+                ESP_LOGI(TAG, "Changed to Command mode");
+                debug_data.connected_to_internet = false;
+            }   
+        }   
+
+	    dce_g->power_down(dce_g); // Reset the modem
+    }
+    vTaskDelay(5000 / portTICK_RATE_MS);
+	esp_restart();
+}

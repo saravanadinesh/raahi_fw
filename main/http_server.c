@@ -25,9 +25,10 @@ extern struct debug_data_struct debug_data;
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
 extern void create_sysconfig_json(char* json_str, uint16_t json_str_len);
+extern void raahi_restart(void);
+extern void display_sysconfig();
 
 // Function declarations
-extern void display_sysconfig();
 int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len);
 
 /* -----------------------------------------------------------
@@ -330,7 +331,7 @@ void update_sysconfig(char* form_str)
 	if(client_id_updated == 1) {
 		ESP_LOGI(TAG, "Client ID updated. So restarting");
        	vTaskDelay(5000 / portTICK_RATE_MS);
-		esp_restart();
+		raahi_restart();
 	}
 }
 
