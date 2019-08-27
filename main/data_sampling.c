@@ -644,6 +644,14 @@ void data_sampling_task(void *param)
 		{
 			time(&now);
     		localtime_r(&now, &timeinfo);
+            if (timeinfo.tm_hour != this_hour)
+            { // Print server availability of all servers
+                this_hour = timeinfo.tm_hour;
+                for(uint8_t server_idx = 0; server_idx < CONFIG_LWIP_DHCP_MAX_NTP_SERVERS; server_idx++)
+                {
+                    RAAHI_LOGI(TAG, "SNTP Server: %s, Availability: %d", sntp_getservername(server_idx), sntp_getreachability(server_idx));
+                }
+            }
 			if (timeinfo.tm_mday != today) {
 				today = timeinfo.tm_mday; // TODO: Is this even necessary?
 				ESP_LOGI(TAG, "Restarting since 24hrs have passed");

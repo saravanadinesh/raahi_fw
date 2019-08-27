@@ -154,7 +154,7 @@ extern void raahi_restart(void);
 
 void time_sync_notification_cb(struct timeval *tv)
 {
-    ESP_LOGI(TAG, "Notification of a time synchronization event");
+    RAAHI_LOGI(TAG, "Notification of a time synchronization event");
 }
 
 
@@ -188,7 +188,9 @@ static void initialize_sntp(void)
 {
     ESP_LOGI(TAG, "Initializing SNTP");
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
+    sntp_setservername(0, "time.google.com");
+    sntp_setservername(1, "in.pool.ntp.org");
+    sntp_setservername(2, "sg.pool.ntp.org");
     sntp_set_time_sync_notification_cb(time_sync_notification_cb);
     sntp_init();
 }
@@ -200,12 +202,12 @@ static void setup_sntp(void)
     time(&now);
     localtime_r(&now, &timeinfo);
     // Is time set? If not, tm_year will be (1970 - 1900).
-    if (timeinfo.tm_year < (2016 - 1900)) {
-        ESP_LOGI(TAG, "Time is not set yet. Connecting to GPRS and getting time over NTP.");
+    //if (timeinfo.tm_year < (2016 - 1900)) {
+    //    ESP_LOGI(TAG, "Time is not set yet. Connecting to GPRS and getting time over NTP.");
         obtain_time();
         // update 'now' variable with current time
         time(&now);
-    }
+    //}
     char strftime_buf[64];
     // Set timezone to Eastern Standard Time and print local time
     setenv("TZ", "IST-5:30", 1);
