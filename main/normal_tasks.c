@@ -439,7 +439,9 @@ void disconnectCallbackHandler(AWS_IoT_Client *pClient, void *data) {
 
 void aws_iot_task(void *param) {
 
-	char topic[MAX_TOPIC_LEN + 1] = {'\0'};
+	time_t now;
+    
+    char topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char data_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char event_topic[MAX_TOPIC_LEN + 1] = {'\0'};
 	char query_topic[MAX_TOPIC_LEN + 1] = {'\0'};
@@ -629,6 +631,13 @@ void aws_iot_task(void *param) {
         	}
 		}
 
+        time(&now);
+        if((now - last_publish_timestamp) > MAX_IDLING_TIME)
+        { // If there hasn't bee anything to send for a long time, data sampling task may be in a hung state
+			RAAHI_LOGE(TAG, "MQTT hasn't sent a message in a long time.");
+			raahi_restart();
+        }
+ 
 		switch(rc)
 		{
 			case SUCCESS:
