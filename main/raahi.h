@@ -29,6 +29,8 @@
 #define MAX_KEY_LEN 25
 #define MAX_VALUE_LEN 25
 
+#define OTA_RECORD_FILE_NAME (const char*)"/spiffs/otarecord.txt"
+
 char raahi_log_str[EVENT_JSON_STR_SIZE];
 #define RAAHI_LOGE( tag, format, ... ) do {\
 	ESP_LOGE(tag, format, ##__VA_ARGS__);\

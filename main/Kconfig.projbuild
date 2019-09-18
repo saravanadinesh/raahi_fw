@@ -48,6 +48,12 @@ menu "Example Configuration"
                 Enter the peer phone number that you want to send message to.
     endif
 
+    config OTA_HEADER_URL
+        string "URL in which OTA header is expected to be present"
+        default "https://download.bodhileaf.io:443/header.bin"
+        help
+            Enter URL with port number and the header file name
+            
     menu "MODEM UART Configuration"
         config EXAMPLE_UART_MODEM_TX_PIN
             int "TXD Pin Number"

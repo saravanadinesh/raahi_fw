@@ -53,11 +53,14 @@
 #define MODEM_SMS_MAX_LENGTH (128)
 #define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
 #define MODEM_PROMPT_TIMEOUT_MS (10)
+#define ESP_CORE_0 0
+#define ESP_CORE_1 1
 
 // Function declarations
 httpd_handle_t start_webserver(void);
 void set_status_LED(status_led_struct status_led);
 void data_sampling_task(void*);
+void ota_by_fragments(void *pvParameter);
 void mobile_radio_init(void);
 void display_sysconfig(void);
 extern int32_t str2num(char* input_str, const char delimiter, uint8_t max_parse_len);
@@ -68,14 +71,17 @@ void display_sysconfig(void);
 void read_sysconfig(void);
 void getMacAddress(char* macAddress);
 
+// Task Handles
+TaskHandle_t dataSamplingTaskHandle;
+TaskHandle_t otaTaskHandle;
+bool otaTaskCreated = false;
+
+// Global variables
 static EventGroupHandle_t modem_event_group = NULL;
 EventGroupHandle_t esp_event_group = NULL;
-//EventGroupHandle_t mqtt_rw_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 const int SNTP_CONNECT_BIT = BIT0;
-//const int READ_OP_DONE = BIT0;
-//const int WRITE_OP_DONE = BIT1;
 
 static const char *TAG = "normal_task";
 modem_dte_t *dte_g;
@@ -87,23 +93,7 @@ char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 uint8_t aws_failures_counter = 0, other_aws_failures_counter = 0;
 uint8_t modem_failures_counter = 0;
 time_t last_publish_timestamp = 0;
-/* The event group allows multiple bits for each event,
-   but we only care about one event - are we connected
-   to the AP with an IP? */
 
-
-
-/* CA Root certificate, device ("Thing") certificate and device
- * ("Thing") key.
-
-   Example can be configured one of two ways:
-
-   "Embedded Certs" are loaded from files in "certs/" and embedded into the app binary.
-
-   "Filesystem Certs" are loaded from the filesystem (SD card, etc.)
-
-   See example README for more details.
-*/
 #if defined(CONFIG_EXAMPLE_EMBEDDED_CERTS)
 
 extern const uint8_t aws_root_ca_pem_start[] asm("_binary_aws_root_ca_pem_start");
@@ -349,11 +339,8 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 
 void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
 {
-	if (no_of_items > 2)
-    {
-        RAAHI_LOGE(TAG, "Only one command cand be issued at a time");
-    }
-    else if (no_of_items < 2)
+    // Error Checks	
+    if (no_of_items < 2)
     {
         RAAHI_LOGE(TAG, "Empty command json");
     }
@@ -374,6 +361,14 @@ void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
 			query_json.write_ptr = (query_json.write_ptr+1) % QUERY_JSON_QUEUE_SIZE;
 			
 		}
+        else if (strcmp(parsed_json[1].value, "update_fw") == 0)
+        {
+            if (otaTaskCreated == true) // This implies that there is a a firmware update already in progress. Kill it. 
+            { 
+                vTaskDelete(otaTaskHandle);
+            } 
+	        xTaskCreatePinnedToCore(&ota_by_fragments, "fragmented_ota_task", 8192, NULL, 10, &otaTaskHandle, ESP_CORE_0);	
+        }
         else
         {
             RAAHI_LOGI(TAG, "Unknown command received. No action taken");
@@ -780,6 +775,7 @@ void normal_tasks()
 {
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
+	FILE* ota_record_file = NULL;
 
 	getMacAddress(user_mqtt_str); // Mac address is used as a unique id of the device in json packets.
 
@@ -804,11 +800,7 @@ void normal_tasks()
 	query_json.read_ptr = 0;
 	query_json.write_ptr = 0;
 
-	//mqtt_rw_group = xEventGroupCreate();
-	//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
-	//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
-
-	xTaskCreatePinnedToCore(&data_sampling_task, "data_sampling_task", 8192, NULL, 10, NULL, 1);	
+	xTaskCreatePinnedToCore(&data_sampling_task, "data_sampling_task", 8192, NULL, 10, &dataSamplingTaskHandle, ESP_CORE_1);	
 	
 	mobile_radio_init();
 
@@ -829,5 +821,11 @@ void normal_tasks()
 	}
  
     xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, 0);
+    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, ESP_CORE_0);
+    
+    // If OTA was in progress before the reset/power cycle, restart OTA
+    ota_record_file = fopen(OTA_RECORD_FILE_NAME, "rb");
+    if (ota_record_file != NULL) { // There was an OTA in progress before reboot.  
+	    xTaskCreatePinnedToCore(&ota_by_fragments, "fragmented_ota_task", 8192, NULL, 10, &otaTaskHandle, ESP_CORE_0);	
+    }
 }
