@@ -21,6 +21,7 @@
 #define QUERY_JSON_STR_SIZE 300
 #define MAX_AWS_FAILURE_COUNT (uint8_t)10
 #define MAX_MODEM_FAILURE_COUNT (uint8_t)20
+#define MAX_OTA_FAIL_COUNT (uint8_t) 20
 #define MAX_MQTT_FAIL_TIME (time_t)180 // seconds
 #define MAX_IDLING_TIME (time_t)600 // seconds
 #define MODEM_MAX_OPERATOR_LENGTH (32) /*!< Max Operator Name Length */

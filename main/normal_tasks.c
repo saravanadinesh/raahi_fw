@@ -92,6 +92,7 @@ char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 //Failure Counters
 uint8_t aws_failures_counter = 0, other_aws_failures_counter = 0;
 uint8_t modem_failures_counter = 0;
+uint8_t fragmented_ota_error_counter = 0;
 time_t last_publish_timestamp = 0;
 
 #if defined(CONFIG_EXAMPLE_EMBEDDED_CERTS)
@@ -366,7 +367,8 @@ void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
             if (otaTaskCreated == true) // This implies that there is a a firmware update already in progress. Kill it. 
             { 
                 vTaskDelete(otaTaskHandle);
-            } 
+            }
+            fragmented_ota_error_counter = 0; 
 	        xTaskCreatePinnedToCore(&ota_by_fragments, "fragmented_ota_task", 8192, NULL, 10, &otaTaskHandle, ESP_CORE_0);	
         }
         else

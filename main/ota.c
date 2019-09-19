@@ -48,7 +48,7 @@ typedef struct
     uint32_t wrote_size;
 }ota_record_t;
 
-uint8_t fragmented_ota_error_counter;
+extern uint8_t fragmented_ota_error_counter;
 
 static esp_err_t prepare_for_ota(int data_read, ota_record_t* ota_record);
 static void read_flash_ota_record(ota_record_t* ota_record);
@@ -162,6 +162,14 @@ void ota_by_fragments(void *pvParameter)
     uint32_t fragment_crc32 = 0;
     while(1) // Loop until failure counters overflow and monitoring task restarts ESP
     {
+        // Always check if there already have been too many errors before proceeding to next iteration
+        if (fragmented_ota_error_counter > MAX_OTA_FAIL_COUNT)
+        {
+            ESP_LOGE(TAG, "Too many fragmented OTA update errors. Quitting OTA update");
+            remove(OTA_RECORD_FILE_NAME);
+            task_fatal_error();
+        }
+ 
         // Get header in every iteration to ensure that FW hasn't changed in the mean time
         get_ota_header(header_url_config, &ota_header, sizeof(ota_header_t));
        
