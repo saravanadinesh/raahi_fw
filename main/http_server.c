@@ -17,13 +17,15 @@
 // Defines
 #define FORM_DATA_BUF_SIZE 256 
 
+static const char *TAG = "http_server";
 
 // External variables
-static const char *TAG = "http_server";
 extern struct config_struct sysconfig;
 extern struct debug_data_struct debug_data;
 extern char raahi_log_str[EVENT_JSON_STR_SIZE];
 extern char user_mqtt_str[MAX_DEVICE_ID_LEN];
+extern zombie_info_struct zombie_info;
+
 extern void create_sysconfig_json(char* json_str, uint16_t json_str_len);
 extern void raahi_restart(void);
 extern void display_sysconfig();
@@ -151,6 +153,11 @@ static esp_err_t infopage_get_handler(httpd_req_t *req)
 		sprintf(tempStr, "\t\t<tr><td>Connected to AWS:</td><td>%s</td></tr>\n", "No");
 	}
 	httpd_resp_sendstr_chunk(req, tempStr);
+	
+    tempStr[0] = '\0';
+	sprintf(tempStr, "\t\t<tr><td>Reset Reason</td><td>%s</td></tr>\n", debug_data.reset_reason_str); 
+	httpd_resp_sendstr_chunk(req, tempStr);
+	
 	
 	for (slave_id_idx = 0; slave_id_idx < MAX_MODBUS_SLAVES; slave_id_idx++)
 	{	
@@ -330,6 +337,7 @@ void update_sysconfig(char* form_str)
 
 	if(client_id_updated == 1) {
 		ESP_LOGI(TAG, "Client ID updated. So restarting");
+        strcpy(zombie_info.esp_restart_reason, "Client ID Updated (http)");
        	vTaskDelay(5000 / portTICK_RATE_MS);
 		raahi_restart();
 	}

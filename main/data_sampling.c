@@ -96,6 +96,7 @@ extern const int SNTP_CONNECT_BIT;
 extern int today, this_hour;
 extern modem_dte_t *dte_g;
 extern modem_dce_t *dce_g;
+extern zombie_info_struct zombie_info;
 
 /* Function Definitions */
 void raahi_restart(void);
@@ -655,6 +656,7 @@ void data_sampling_task(void *param)
 			if (timeinfo.tm_mday != today) {
 				today = timeinfo.tm_mday; // TODO: Is this even necessary?
 				ESP_LOGI(TAG, "Restarting since 24hrs have passed");
+                strcpy(zombie_info.esp_restart_reason, "24hr Passed");
 				raahi_restart();
 			}
 		}
@@ -662,22 +664,26 @@ void data_sampling_task(void *param)
 		// Check if any error counters have crossed their respective thresholds and restart if so
 		if (aws_failures_counter > MAX_AWS_FAILURE_COUNT) {
     		ESP_LOGE(TAG, "Too many failures in AWS loop");
+            strcpy(zombie_info.esp_restart_reason, "AWS Failures");
 			raahi_restart();
 		}
 	
 		if (other_aws_failures_counter > MAX_AWS_FAILURE_COUNT) { 
     		ESP_LOGE(TAG, "Too many other failures in AWS loop");
+            strcpy(zombie_info.esp_restart_reason, "AWS Other Failures");
 			raahi_restart();
 		}
-		
+
 		if (modem_failures_counter > MAX_MODEM_FAILURE_COUNT) { 
     		ESP_LOGE(TAG, "Too many modem failures");
+            strcpy(zombie_info.esp_restart_reason, "Modem Failures");
 			raahi_restart();
 		}
 
 		if (last_publish_timestamp !=0 && (now - last_publish_timestamp) > MAX_MQTT_FAIL_TIME) // This is just an extra check. usually checks above this should obviate this	
 		{
 			ESP_LOGE(TAG, "MQTT hasn't sent a message in a long time.");
+            strcpy(zombie_info.esp_restart_reason, "MQTT Long Idle");
 			raahi_restart();
 		}
 	}// End of infinite while loop		
@@ -706,7 +712,7 @@ void raahi_restart()
             }   
         }   
 
-	    dce_g->power_down(dce_g); // Reset the modem
+	    //dce_g->power_down(dce_g); // Reset the modem
     }
     vTaskDelay(5000 / portTICK_RATE_MS);
 	esp_restart();

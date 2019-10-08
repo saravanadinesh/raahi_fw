@@ -50,7 +50,7 @@
 */
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
-#define MODEM_SMS_MAX_LENGTH (128)
+#define MODEM_SMS_MAX_LENGTH (160)
 #define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
 #define MODEM_PROMPT_TIMEOUT_MS (10)
 #define ESP_CORE_0 0
@@ -94,6 +94,8 @@ uint8_t aws_failures_counter = 0, other_aws_failures_counter = 0;
 uint8_t modem_failures_counter = 0;
 uint8_t fragmented_ota_error_counter = 0;
 time_t last_publish_timestamp = 0;
+
+zombie_info_struct zombie_info;
 
 #if defined(CONFIG_EXAMPLE_EMBEDDED_CERTS)
 
@@ -141,7 +143,9 @@ uint32_t port = AWS_IOT_MQTT_PORT;
 static void obtain_time(void);
 static void initialize_sntp(void);
 extern void raahi_restart(void);
-
+void create_info_json(char* json_str, uint16_t json_str_len);
+void write_zombie_info();
+void read_zombie_info();
 
 void time_sync_notification_cb(struct timeval *tv)
 {
@@ -252,8 +256,7 @@ static esp_err_t modem_handle_cmgs(modem_dce_t *dce, const char *line)
     return err;
 }
 
-
-static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num, const char *text)
+static esp_err_t modem_send_text_message(modem_dce_t *dce, const char *phone_num, char *text)
 {
     modem_dte_t *dte = dce->dte;
     dce->handle_line = modem_default_handle;
@@ -261,26 +264,27 @@ static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num
     if (dte->send_cmd(dte, "AT+CMGF=1\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
         RAAHI_LOGE(TAG, "send command failed");
         goto err;
-    }
+    }   
     if (dce->state != MODEM_STATE_SUCCESS) {
         RAAHI_LOGE(TAG, "set message format failed");
         goto err;
-    }
+    }   
     RAAHI_LOGD(TAG, "set message format ok");
     /* Specify character set */
     dce->handle_line = modem_default_handle;
     if (dte->send_cmd(dte, "AT+CSCS=\"GSM\"\r", MODEM_COMMAND_TIMEOUT_DEFAULT) != ESP_OK) {
         RAAHI_LOGE(TAG, "send command failed");
         goto err;
-    }
+    }   
     if (dce->state != MODEM_STATE_SUCCESS) {
         RAAHI_LOGE(TAG, "set character set failed");
         goto err;
-    }
+    }  
     RAAHI_LOGD(TAG, "set character set ok");
     /* send message */
     char command[MODEM_SMS_MAX_LENGTH] = {0};
     int length = snprintf(command, MODEM_SMS_MAX_LENGTH, "AT+CMGS=\"%s\"\r", phone_num);
+    
     /* set phone number and wait for "> " */
     dte->send_wait(dte, command, length, "\r\n> ", MODEM_PROMPT_TIMEOUT_MS);
     /* end with CTRL+Z */
@@ -299,6 +303,7 @@ static esp_err_t modem_send_message_text(modem_dce_t *dce, const char *phone_num
 err:
     return ESP_FAIL;
 }
+
 
 static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -323,6 +328,7 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
 		debug_data.connected_to_internet = false;
 		// Restart modem
         vTaskDelay(1000/portTICK_RATE_MS);
+        strcpy(zombie_info.esp_restart_reason, "Modem PPP Diconnect");
 		raahi_restart();
 		break;
     case MODEM_EVENT_PPP_STOP:
@@ -350,6 +356,7 @@ void execute_json_command(struct json_struct* parsed_json, uint8_t no_of_items)
         if(strcmp(parsed_json[1].value, "restart") == 0)
         {
             RAAHI_LOGI(TAG, "Restart command received. Restarting in 5 seconds");
+            strcpy(zombie_info.esp_restart_reason, "Command from AWS");
             vTaskDelay(5000/ portTICK_RATE_MS);
             raahi_restart();
         }
@@ -632,7 +639,8 @@ void aws_iot_task(void *param) {
         if((now - last_publish_timestamp) > MAX_IDLING_TIME)
         { // If there hasn't bee anything to send for a long time, data sampling task may be in a hung state
 			RAAHI_LOGE(TAG, "MQTT hasn't sent a message in a long time.");
-			raahi_restart();
+            strcpy(zombie_info.esp_restart_reason, "MQTT Long Idle (AWS Task)");
+            esp_restart();
         }
  
 		switch(rc)
@@ -700,6 +708,7 @@ void mobile_radio_init()
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
+            strcpy(zombie_info.esp_restart_reason, "DTE Init Failed");
 			esp_restart();
 		}	
 	}
@@ -717,12 +726,13 @@ void mobile_radio_init()
 	    retries++;
 		if (retries > 30) {
 			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
+            strcpy(zombie_info.esp_restart_reason, "DCE Init Failed");
 			esp_restart();
 		}	
 	}
-    
+
     dce_g->set_working_mode(dce_g, MODEM_COMMAND_MODE); // This is to ensure that modem is in command mode before proceeding
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 	
     //dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
     ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
@@ -748,6 +758,14 @@ void mobile_radio_init()
     ESP_LOGI(TAG, "Battery voltage: %d mV", voltage);
 	debug_data.battery_voltage = voltage;	
 
+    // Send an SMS at the beginning 
+    char info_json[INFO_JSON_LEN];
+    create_info_json(info_json, INFO_JSON_LEN);
+    printf("Created Info Json\n");
+    ESP_ERROR_CHECK(modem_send_text_message(dce_g, CONFIG_MONITOR_PHONE_NUMBER, info_json));
+    ESP_LOGI(TAG, "Send message [%s] ok", info_json);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+
     /* Setup PPP environment */
     if(esp_modem_setup_ppp(dte_g) == ESP_FAIL) {
 		ESP_LOGE(TAG, "Modem PPP setup failed");
@@ -762,12 +780,6 @@ void mobile_radio_init()
     /* Wait for IP address */
     xEventGroupWaitBits(modem_event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
-#if CONFIG_SEND_MSG
-    const char *message = "Welcome to ESP32!";
-    ESP_ERROR_CHECK(modem_send_message_text(dce_g, CONFIG_SEND_MSG_PEER_PHONE_NUMBER, message));
-    ESP_LOGI(TAG, "Send message [%s] ok", message);
-#endif
-    
 	debug_data.connected_to_internet = true;
 	/* Start NTP sync */
     setup_sntp();
@@ -778,6 +790,17 @@ void normal_tasks()
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
 	FILE* ota_record_file = NULL;
+
+    read_zombie_info();
+
+    esp_register_shutdown_handler((shutdown_handler_t)write_zombie_info);
+
+    // Initialize all error counters to zero
+    aws_failures_counter = 0;
+    other_aws_failures_counter = 0;
+    modem_failures_counter = 0;
+    fragmented_ota_error_counter = 0;
+    last_publish_timestamp = 0;
 
 	getMacAddress(user_mqtt_str); // Mac address is used as a unique id of the device in json packets.
 
@@ -791,8 +814,8 @@ void normal_tasks()
 
 	debug_data.connected_to_internet = false;
 	debug_data.connected_to_aws = false;
- 
-	// Get the homepage up: Initialize webserver, register all handlers
+	
+    // Get the homepage up: Initialize webserver, register all handlers
     start_webserver();
   
 	data_json.read_ptr = 0;

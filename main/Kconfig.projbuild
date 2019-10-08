@@ -34,19 +34,11 @@ menu "Example Configuration"
         help
             Set password for PPP Authentication.
 
-    config EXAMPLE_SEND_MSG
-        bool "Short message (SMS)"
-        default n
+    config MONITOR_PHONE_NUMBER
+        string "Monitor Phone Number (with area code)"
+        default "+917588248846"
         help
-            Select this, the modem will send a short message before power off.
-
-    if EXAMPLE_SEND_MSG
-        config EXAMPLE_SEND_MSG_PEER_PHONE_NUMBER
-            string "Peer Phone Number (with area code)"
-            default "+8610086"
-            help
-                Enter the peer phone number that you want to send message to.
-    endif
+            Enter the monitoring phone number that you want to send message to. 
 
     config OTA_HEADER_URL
         string "URL in which OTA header is expected to be present"
