@@ -696,24 +696,24 @@ void data_sampling_task(void *param)
 ------------------------------------------------------------*/
 void raahi_restart()
 {
-    if(dce_g != NULL && dte_g != NULL)
-    {
-        // Stop PPP, switch dte, dce to command mode and sample signal parameters
-        if(dce_g->mode == MODEM_PPP_MODE) // This check is required when change to PPP mode (below) doesn't work
-        {   
-            if(esp_modem_exit_ppp(dte_g) == ESP_FAIL)
-            {   
-                ESP_LOGE(TAG, "Changing to command mode failed");
-            }   
-            else
-            {   
-                ESP_LOGI(TAG, "Changed to Command mode");
-                debug_data.connected_to_internet = false;
-            }   
-        }   
-
-	    //dce_g->power_down(dce_g); // Reset the modem
-    }
+//    if(dce_g != NULL && dte_g != NULL)
+//    {
+//        // Stop PPP, switch dte, dce to command mode and sample signal parameters
+//        if(dce_g->mode == MODEM_PPP_MODE) // This check is required when change to PPP mode (below) doesn't work
+//        {   
+//            if(esp_modem_exit_ppp(dte_g) == ESP_FAIL)
+//            {   
+//                ESP_LOGE(TAG, "Changing to command mode failed");
+//            }   
+//            else
+//            {   
+//                ESP_LOGI(TAG, "Changed to Command mode");
+//                debug_data.connected_to_internet = false;
+//            }   
+//        }   
+//
+//	    //dce_g->power_down(dce_g); // Reset the modem
+//    }
     vTaskDelay(5000 / portTICK_RATE_MS);
 	esp_restart();
 }

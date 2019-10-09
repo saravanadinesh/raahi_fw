@@ -229,7 +229,6 @@ void create_info_json(char* json_str, uint16_t json_str_len)
             break;
         }
     }
-    printf("Info json before returning from function: %s\n", json_str);
 }
                                
 /* -----------------------------------------------------------

@@ -731,8 +731,8 @@ void mobile_radio_init()
 		}	
 	}
 
-    dce_g->set_working_mode(dce_g, MODEM_COMMAND_MODE); // This is to ensure that modem is in command mode before proceeding
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //dce_g->set_working_mode(dce_g, MODEM_COMMAND_MODE); // This is to ensure that modem is in command mode before proceeding
+    //vTaskDelay(1000 / portTICK_PERIOD_MS);
 	
     //dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
     ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
@@ -761,7 +761,6 @@ void mobile_radio_init()
     // Send an SMS at the beginning 
     char info_json[INFO_JSON_LEN];
     create_info_json(info_json, INFO_JSON_LEN);
-    printf("Created Info Json\n");
     ESP_ERROR_CHECK(modem_send_text_message(dce_g, CONFIG_MONITOR_PHONE_NUMBER, info_json));
     ESP_LOGI(TAG, "Send message [%s] ok", info_json);
     vTaskDelay(10000 / portTICK_PERIOD_MS);
