@@ -23,6 +23,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_log.h"
@@ -42,19 +43,17 @@
 #include "esp_sntp.h"
 #include "raahi.h"
  
-/* The examples use simple WiFi configuration that you can set via
-   'make menuconfig'.
-
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
-#define MODEM_SMS_MAX_LENGTH (160)
-#define MODEM_COMMAND_TIMEOUT_SMS_MS (120000)
+#define MODEM_SMS_MAX_LENGTH (128)
+#define MODEM_COMMAND_TIMEOUT_SMS_MS (10000)
 #define MODEM_PROMPT_TIMEOUT_MS (10)
 #define ESP_CORE_0 0
 #define ESP_CORE_1 1
+#define IP_WAIT_TIME_MS 60000
+#define SNTP_WAIT_TIME_IN_MS 30000
+#define WDT_TIMEOUT_IN_SEC 120 // Must be greater than IP_WAIT_TIME_MS+SNTP_WAIT_TIME_MS
+#define SIM800_RESET_GPIO GPIO_NUM_33
 
 // Function declarations
 httpd_handle_t start_webserver(void);
@@ -73,6 +72,7 @@ void getMacAddress(char* macAddress);
 
 // Task Handles
 TaskHandle_t dataSamplingTaskHandle;
+TaskHandle_t awsTaskHandle;
 TaskHandle_t otaTaskHandle;
 bool otaTaskCreated = false;
 
@@ -86,6 +86,7 @@ const int SNTP_CONNECT_BIT = BIT0;
 static const char *TAG = "normal_task";
 modem_dte_t *dte_g;
 modem_dce_t *dce_g;
+static gpio_config_t sim800_reset_gpio;
 
 char user_mqtt_str[MAX_DEVICE_ID_LEN] = {'\0'};
 
@@ -165,12 +166,12 @@ static void obtain_time(void)
     time_t now = 0;
     struct tm timeinfo = { 0 };
     int retry = 0;
-    const int retry_count = 30;
+    const int retry_count = 10;
     while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
-	if (retry == 30) {
+	if (retry == 10) {
 		ESP_LOGI(TAG, "SNTP time could not be obtained");
 		abort(); // If 
 	}
@@ -327,9 +328,9 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
         ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
 		debug_data.connected_to_internet = false;
 		// Restart modem
-        vTaskDelay(1000/portTICK_RATE_MS);
+        vTaskDelay(5000/portTICK_RATE_MS);
         strcpy(zombie_info.esp_restart_reason, "Modem PPP Diconnect");
-		raahi_restart();
+		esp_restart();
 		break;
     case MODEM_EVENT_PPP_STOP:
         RAAHI_LOGI(TAG, "Modem PPP Stopped");
@@ -460,13 +461,16 @@ void aws_iot_task(void *param) {
 	strcat(topic, CONFIG_MQTT_TOPIC_ROOT); 
 
 	strcpy(data_topic, topic);
-	strcat(data_topic, "/data");
+	strcat(data_topic, "/data/");
+	strcat(data_topic, user_mqtt_str);
 
 	strcpy(event_topic, topic);
-	strcat(event_topic, "/event");
+	strcat(event_topic, "/event/");
+	strcat(event_topic, user_mqtt_str);
 	
 	strcpy(query_topic, topic);
-	strcat(query_topic, "/query");
+	strcat(query_topic, "/query/");
+	strcat(query_topic, user_mqtt_str);
 	
 	strcpy(subscribe_topic, topic);
 	strcat(subscribe_topic, "/");
@@ -516,10 +520,6 @@ void aws_iot_task(void *param) {
         ESP_LOGE(TAG, "aws_iot_mqtt_init returned error : %d ", rc);
         abort();
     }
-
-    /* Wait for WiFI to show as connected */
-//    xEventGroupWaitBits(wifi_modem_event_group, CONNECTED_BIT,
-//                        false, true, portMAX_DELAY);
 
     connectParams.keepAliveIntervalInSec = 30;
     connectParams.isCleanSession = true;
@@ -577,7 +577,10 @@ void aws_iot_task(void *param) {
 	
 	rc = SUCCESS;
     while(1) { 
-		//Max time the yield function will wait for read messages
+        //Reset watchdog timer for _this_ task 
+        CHECK_ERROR_CODE(esp_task_wdt_reset(), ESP_OK);	
+		
+        //Max time the yield function will wait for read messages
         yield_rc = aws_iot_mqtt_yield(&client, 15000);
 		if (SUCCESS != yield_rc) {
 			ESP_LOGI(TAG, "MQTT yeild wasn't successful");
@@ -585,8 +588,6 @@ void aws_iot_task(void *param) {
 
 			
 		while ((data_json.write_ptr != data_json.read_ptr) && rc == SUCCESS){ // Implies there are unsent mqtt messages
-		    //xEventGroupWaitBits(mqtt_rw_group, WRITE_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-		    //xEventGroupClearBits(mqtt_rw_group, READ_OP_DONE);
 		    strcpy(dPayload, data_json.packet[data_json.read_ptr]);  
 		    dataPacket.payloadLen = strlen(dPayload);
         	    rc = aws_iot_mqtt_publish(&client, data_topic, strlen(data_topic), &dataPacket);
@@ -600,7 +601,6 @@ void aws_iot_task(void *param) {
 				time(&last_publish_timestamp); // Update last publish timestamp
 				ESP_LOGI(TAG, "Sent a data json");
 		    }
-			//xEventGroupSetBits(mqtt_rw_group, READ_OP_DONE);
 		}
 
 		while ((event_json.write_ptr != event_json.read_ptr) && rc == SUCCESS) { // Implies there are unsent mqtt messages
@@ -686,54 +686,68 @@ void aws_iot_task(void *param) {
 				break;
 
 		} // End of switch statement 
-	
+
     } // End of infinite while loop
 
 }
 
+
+void sim800_hardreset()
+{
+    ESP_LOGI(TAG, "Hard resetting Sim800");
+    gpio_set_level(SIM800_RESET_GPIO, 0);
+    vTaskDelay(500 / portTICK_PERIOD_MS); // pull down time must be >150ms
+    gpio_set_level(SIM800_RESET_GPIO, 1);
+}
+
 void mobile_radio_init()
 {
-	uint8_t retries; 
-   
 	dte_g = NULL;
 	dce_g = NULL;
  
 	/* create dte object */
     esp_modem_dte_config_t config = ESP_MODEM_DTE_DEFAULT_CONFIG();
 
-	retries = 0;
-	while((dte_g = esp_modem_dte_init(&config)) == NULL)
+	if((dte_g = esp_modem_dte_init(&config)) == NULL)
 	{
-		vTaskDelay(10000 / portTICK_PERIOD_MS);
-	    retries++;
-		if (retries > 30) {
-			RAAHI_LOGE(TAG, "DTE initialization did not work\n");
-            strcpy(zombie_info.esp_restart_reason, "DTE Init Failed");
-			esp_restart();
-		}	
+		ESP_LOGE(TAG, "DTE initialization did not work\n");
+        strcpy(zombie_info.esp_restart_reason, "DTE Init Failed");
+		esp_restart();
 	}
 
     /* Register event handler */
     ESP_ERROR_CHECK(esp_modem_add_event_handler(dte_g, modem_event_handler, NULL));
     /* create dce object */
 
-	retries = 0;
-    /* Wait for 2 secs for Modem info to populate*/ 
+    // Set up the SIm800 GPIO
+    sim800_reset_gpio.intr_type = GPIO_PIN_INTR_DISABLE;
+    sim800_reset_gpio.mode = GPIO_MODE_OUTPUT;
+    sim800_reset_gpio.pin_bit_mask = (1ULL << SIM800_RESET_GPIO);
+    sim800_reset_gpio.pull_up_en = 0;   // Keep it floating until it is used
+    sim800_reset_gpio.pull_down_en = 0;
+    gpio_config(&sim800_reset_gpio);
+
+    /* Wait for 2 secs for Modem info to populate*/
+     
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-	while ((dce_g = sim800_init(dte_g)) == NULL) 
-	{
-		vTaskDelay(10000 / portTICK_PERIOD_MS);
-	    retries++;
-		if (retries > 30) {
-			RAAHI_LOGE(TAG, "DCE initialization did not work\n");
-            strcpy(zombie_info.esp_restart_reason, "DCE Init Failed");
-			esp_restart();
-		}	
+    uint8_t retries = 0;
+	for (retries = 0; retries < 5; retries++) 
+    {
+        if((dce_g = sim800_init(dte_g)) != NULL) 
+	    {
+            break;
+        }
+    }
+    
+    if (retries == 5)
+    {
+        ESP_LOGE(TAG, "DCE initialization did not work\n");
+        strcpy(zombie_info.esp_restart_reason, "DCE Init Failed");
+        sim800_hardreset();
+        vTaskDelay(30000 / portTICK_PERIOD_MS);
+		esp_restart();
 	}
 
-    //dce_g->set_working_mode(dce_g, MODEM_COMMAND_MODE); // This is to ensure that modem is in command mode before proceeding
-    //vTaskDelay(1000 / portTICK_PERIOD_MS);
-	
     //dte_g->change_mode(dte_g, MODEM_COMMAND_MODE);
     ESP_ERROR_CHECK(dce_g->set_flow_ctrl(dce_g, MODEM_FLOW_CONTROL_NONE));
     ESP_ERROR_CHECK(dce_g->store_profile(dce_g));
@@ -759,11 +773,11 @@ void mobile_radio_init()
 	debug_data.battery_voltage = voltage;	
 
     // Send an SMS at the beginning 
-    char info_json[INFO_JSON_LEN];
-    create_info_json(info_json, INFO_JSON_LEN);
-    ESP_ERROR_CHECK(modem_send_text_message(dce_g, CONFIG_MONITOR_PHONE_NUMBER, info_json));
-    ESP_LOGI(TAG, "Send message [%s] ok", info_json);
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    //char info_json[INFO_JSON_LEN];
+    //create_info_json(info_json, INFO_JSON_LEN);
+    //modem_send_text_message(dce_g, CONFIG_MONITOR_PHONE_NUMBER, info_json);
+    //ESP_LOGI(TAG, "Send message [%s] ok", info_json);
+    //vTaskDelay(10000 / portTICK_PERIOD_MS);
 
     /* Setup PPP environment */
     if(esp_modem_setup_ppp(dte_g) == ESP_FAIL) {
@@ -777,7 +791,13 @@ void mobile_radio_init()
 	set_status_LED(status_led);
 	
     /* Wait for IP address */
-    xEventGroupWaitBits(modem_event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    EventBits_t ipWaitBits;
+    ipWaitBits = xEventGroupWaitBits(modem_event_group, CONNECT_BIT, pdTRUE, pdTRUE, IP_WAIT_TIME_MS/portTICK_PERIOD_MS);
+    if(!(ipWaitBits & CONNECT_BIT)) // If it timed out and we didn't get an IP address
+    {
+        strcpy(zombie_info.esp_restart_reason, "IP not obtained");
+		esp_restart();
+    }
 
 	debug_data.connected_to_internet = true;
 	/* Start NTP sync */
@@ -789,6 +809,13 @@ void normal_tasks()
 	static const char* config_file_name = "/spiffs/sysconfig.txt";
 	FILE* config_file = NULL;
 	FILE* ota_record_file = NULL;
+ 
+    // Init (or Reinit) watchdog timer
+    CHECK_ERROR_CODE(esp_task_wdt_init(WDT_TIMEOUT_IN_SEC, true), ESP_OK); // Here 'true' is to invoke panic handler if WDT expires
+    
+    //Subscribe this task to TWDT, then check if it is subscribed
+    CHECK_ERROR_CODE(esp_task_wdt_add(NULL), ESP_OK); // NULL implies _this_ task
+    CHECK_ERROR_CODE(esp_task_wdt_status(NULL), ESP_OK);
 
     read_zombie_info();
 
@@ -804,7 +831,7 @@ void normal_tasks()
 	getMacAddress(user_mqtt_str); // Mac address is used as a unique id of the device in json packets.
 
 	read_sysconfig();
-	
+
 	ESP_LOGI(TAG, "Waiting 10 sec for the modem to warm up");
 	vTaskDelay(10000 / portTICK_PERIOD_MS);
     
@@ -824,7 +851,9 @@ void normal_tasks()
 	query_json.read_ptr = 0;
 	query_json.write_ptr = 0;
 
-	xTaskCreatePinnedToCore(&data_sampling_task, "data_sampling_task", 8192, NULL, 10, &dataSamplingTaskHandle, ESP_CORE_1);	
+	xTaskCreatePinnedToCore(&data_sampling_task, "data_sampling_task", 8192, NULL, 9, &dataSamplingTaskHandle, ESP_CORE_1);	
+    CHECK_ERROR_CODE(esp_task_wdt_add(dataSamplingTaskHandle), ESP_OK); 
+    CHECK_ERROR_CODE(esp_task_wdt_status(dataSamplingTaskHandle), ESP_OK);
 	
 	mobile_radio_init();
 
@@ -843,13 +872,30 @@ void normal_tasks()
 	    }
 	    fclose(config_file);
 	}
- 
-    xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 10, NULL, ESP_CORE_0);
+    
+    EventBits_t sntpWaitBits;
+    sntpWaitBits = xEventGroupWaitBits(esp_event_group, SNTP_CONNECT_BIT, pdFALSE, pdTRUE, SNTP_WAIT_TIME_IN_MS/portTICK_PERIOD_MS);
+    if(!(sntpWaitBits & CONNECT_BIT)) // If it timed out and we didn't get an IP address
+    {
+        strcpy(zombie_info.esp_restart_reason, "Time not obtained");
+		esp_restart();
+    }
+
+    xTaskCreatePinnedToCore(&aws_iot_task, "aws_iot_task", 9216, NULL, 6, &awsTaskHandle, ESP_CORE_0);
+    CHECK_ERROR_CODE(esp_task_wdt_add(awsTaskHandle), ESP_OK); 
+    CHECK_ERROR_CODE(esp_task_wdt_status(awsTaskHandle), ESP_OK);
     
     // If OTA was in progress before the reset/power cycle, restart OTA
     ota_record_file = fopen(OTA_RECORD_FILE_NAME, "rb");
     if (ota_record_file != NULL) { // There was an OTA in progress before reboot.  
-	    xTaskCreatePinnedToCore(&ota_by_fragments, "fragmented_ota_task", 8192, NULL, 10, &otaTaskHandle, ESP_CORE_0);	
+	    xTaskCreatePinnedToCore(&ota_by_fragments, "fragmented_ota_task", 8192, NULL, 8, &otaTaskHandle, ESP_CORE_0);	
+        CHECK_ERROR_CODE(esp_task_wdt_add(otaTaskHandle), ESP_OK); 
+        CHECK_ERROR_CODE(esp_task_wdt_status(otaTaskHandle), ESP_OK);
     }
+
+    // We don't need to feed the watchdog for the normal task because we don't have any infinite loops. If we delete this task
+    // from TWDT watchlist before the it fires, we are good
+    CHECK_ERROR_CODE(esp_task_wdt_delete(NULL), ESP_OK);     //Unsubscribe _this_ task from TWDT
+    CHECK_ERROR_CODE(esp_task_wdt_status(NULL), ESP_ERR_NOT_FOUND);  //Confirm task is unsubscribed
+
 }

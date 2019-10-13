@@ -219,6 +219,22 @@ static esp_err_t sim800_handle_cops(modem_dce_t *dce, const char *line)
 }
 
 /**
+ * @brief Handle response from AT+CFUN=1,1
+ */
+static esp_err_t sim800_handle_reset(modem_dce_t *dce, const char *line)
+{
+    esp_err_t err = ESP_FAIL;
+    if (strstr(line, MODEM_RESULT_CODE_SUCCESS)) {
+        err = esp_modem_process_command_done(dce, MODEM_STATE_SUCCESS);
+    } else if (strstr(line, MODEM_RESULT_CODE_NO_CARRIER)) {
+        err = esp_modem_process_command_done(dce, MODEM_STATE_SUCCESS);
+    } else if (strstr(line, MODEM_RESULT_CODE_ERROR)) {
+        err = esp_modem_process_command_done(dce, MODEM_STATE_FAIL);
+    }
+    return err;
+}
+
+/**
  * @brief Handle response from AT+CPOWD=1
  */
 static esp_err_t sim800_handle_power_down(modem_dce_t *dce, const char *line)
@@ -315,6 +331,27 @@ static esp_err_t sim800_set_working_mode(modem_dce_t *dce, modem_mode_t mode)
         goto err;
         break;
     }
+    return ESP_OK;
+err:
+	modem_failures_counter++;
+    return ESP_FAIL;
+}
+
+/**
+ * @brief Reset
+ *
+ * @param sim800_dce sim800 object
+ * @return esp_err_t
+ *      - ESP_OK on success
+ *      - ESP_FAIL on error
+ */
+static esp_err_t sim800_reset(modem_dce_t *dce)
+{
+    modem_dte_t *dte = dce->dte;
+    dce->handle_line = sim800_handle_reset;
+    DCE_CHECK(dte->send_cmd(dte, "AT+CFUN=1,1\r", MODEM_COMMAND_TIMEOUT_POWEROFF) == ESP_OK, "send command failed", err);
+    DCE_CHECK(dce->state == MODEM_STATE_SUCCESS, "reset failed", err);
+    ESP_LOGD(DCE_TAG, "reset ok");
     return ESP_OK;
 err:
 	modem_failures_counter++;
@@ -465,6 +502,7 @@ modem_dce_t *sim800_init(modem_dte_t *dte)
     sim800_dce->parent.get_battery_status = sim800_get_battery_status;
     sim800_dce->parent.set_working_mode = sim800_set_working_mode;
     sim800_dce->parent.power_down = sim800_power_down;
+    sim800_dce->parent.reset = sim800_reset;
     sim800_dce->parent.deinit = sim800_deinit;
     /* Sync between DTE and DCE */
     DCE_CHECK(esp_modem_dce_sync(&(sim800_dce->parent)) == ESP_OK, "sync failed", err_io);

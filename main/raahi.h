@@ -71,7 +71,12 @@ char raahi_log_str[EVENT_JSON_STR_SIZE];
 	compose_mqtt_event(tag, raahi_log_str);\
 	}while(0)
 
-
+#define CHECK_ERROR_CODE(returned, expected) ({                        \
+            if(returned != expected){                                  \
+                printf("TWDT ERROR\n");                                \
+                abort();                                               \
+            }                                                          \
+})
 
 // Function declarations
 void compose_mqtt_event(const char *TAG, char *msg);
