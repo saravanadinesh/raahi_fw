@@ -11,6 +11,7 @@
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "soc/uart_struct.h"
@@ -96,6 +97,7 @@ extern const int SNTP_CONNECT_BIT;
 extern int today, this_hour;
 extern modem_dte_t *dte_g;
 extern modem_dce_t *dce_g;
+extern zombie_info_struct zombie_info;
 
 /* Function Definitions */
 void raahi_restart(void);
@@ -303,11 +305,8 @@ void modbus_sensor_task()
 							"reg_address", sysconfig.reg_address[reg_address_idx], \
 							"reg_value", modbus_read_result);
 				}
-				//xEventGroupWaitBits(mqtt_rw_group, READ_OP_DONE, pdFALSE, pdTRUE, portMAX_DELAY); // Wait until aws task reads from queue
-				//xEventGroupClearBits(mqtt_rw_group, WRITE_OP_DONE);
 				strcpy(data_json.packet[data_json.write_ptr], cPayload);
 				data_json.write_ptr = (data_json.write_ptr+1) % DATA_JSON_QUEUE_SIZE;
-				//xEventGroupSetBits(mqtt_rw_group, WRITE_OP_DONE);
 
 				ESP_LOGI(TAG, "Json: %s", cPayload);
 
@@ -600,8 +599,10 @@ void data_sampling_task(void *param)
 
     ESP_ERROR_CHECK(i2c_master_init());
 	while(1) {
-
-    	// Configure UART parameters for sampling on MODBUS
+        //Reset watchdog timer for _this_ task 
+        CHECK_ERROR_CODE(esp_task_wdt_reset(), ESP_OK);	
+    	
+        // Configure UART parameters for sampling on MODBUS
     	uart_param_config(DATA_SAMPLING_UART, &uart_config);
     	uart_set_pin(DATA_SAMPLING_UART, MODBUS_TXD, MODBUS_RXD, MODBUS_RTS, MODBUS_CTS);
     	uart_driver_install(DATA_SAMPLING_UART, BUF_SIZE * 2, 0, 0, NULL, 0);
@@ -642,8 +643,13 @@ void data_sampling_task(void *param)
 		// We should restart every 1 day to make sure the code isn't stuck in some place forever
     	if(xEventGroupGetBits(esp_event_group)  & SNTP_CONNECT_BIT)
 		{
+
 			time(&now);
     		localtime_r(&now, &timeinfo);
+            // test code begins
+            //raahi_restart();
+            //vTaskDelay(20000 / portTICK_RATE_MS);
+            // test code ends
             if (timeinfo.tm_hour != this_hour)
             { // Print server availability of all servers
                 this_hour = timeinfo.tm_hour;
@@ -655,6 +661,7 @@ void data_sampling_task(void *param)
 			if (timeinfo.tm_mday != today) {
 				today = timeinfo.tm_mday; // TODO: Is this even necessary?
 				ESP_LOGI(TAG, "Restarting since 24hrs have passed");
+                strcpy(zombie_info.esp_restart_reason, "24hr Passed");
 				raahi_restart();
 			}
 		}
@@ -662,24 +669,29 @@ void data_sampling_task(void *param)
 		// Check if any error counters have crossed their respective thresholds and restart if so
 		if (aws_failures_counter > MAX_AWS_FAILURE_COUNT) {
     		ESP_LOGE(TAG, "Too many failures in AWS loop");
+            strcpy(zombie_info.esp_restart_reason, "AWS Failures");
 			raahi_restart();
 		}
 	
 		if (other_aws_failures_counter > MAX_AWS_FAILURE_COUNT) { 
     		ESP_LOGE(TAG, "Too many other failures in AWS loop");
+            strcpy(zombie_info.esp_restart_reason, "AWS Other Failures");
 			raahi_restart();
 		}
-		
+
 		if (modem_failures_counter > MAX_MODEM_FAILURE_COUNT) { 
     		ESP_LOGE(TAG, "Too many modem failures");
+            strcpy(zombie_info.esp_restart_reason, "Modem Failures");
 			raahi_restart();
 		}
 
 		if (last_publish_timestamp !=0 && (now - last_publish_timestamp) > MAX_MQTT_FAIL_TIME) // This is just an extra check. usually checks above this should obviate this	
 		{
 			ESP_LOGE(TAG, "MQTT hasn't sent a message in a long time.");
+            strcpy(zombie_info.esp_restart_reason, "MQTT Long Idle");
 			raahi_restart();
 		}
+        
 	}// End of infinite while loop		
   	
 }
@@ -690,23 +702,48 @@ void data_sampling_task(void *param)
 ------------------------------------------------------------*/
 void raahi_restart()
 {
+    int try;
+    const char *LOCAL_TAG = "RAAHI_RESTART";
+
     if(dce_g != NULL && dte_g != NULL)
     {
         // Stop PPP, switch dte, dce to command mode and sample signal parameters
         if(dce_g->mode == MODEM_PPP_MODE) // This check is required when change to PPP mode (below) doesn't work
-        {   
-            if(esp_modem_exit_ppp(dte_g) == ESP_FAIL)
-            {   
-                ESP_LOGE(TAG, "Changing to command mode failed");
-            }   
-            else
-            {   
-                ESP_LOGI(TAG, "Changed to Command mode");
-                debug_data.connected_to_internet = false;
-            }   
-        }   
+        {  
+            try = 0;
+            ESP_LOGI(LOCAL_TAG, "Changing to command mode");
+            do
+            { 
+                if(esp_modem_exit_ppp(dte_g)  == ESP_OK)
+                {   
+                    ESP_LOGI(LOCAL_TAG, "Successfully changed to command mode");
+                    break;
+                }
+                try++;
+            }while(try < 5);   
+         }   
 
-	    dce_g->power_down(dce_g); // Reset the modem
+        try = 0;
+        ESP_LOGI(LOCAL_TAG, "Resetting Sim800");
+        do
+        {
+	        if(dce_g->reset(dce_g) == ESP_OK) 
+            {
+                ESP_LOGI(LOCAL_TAG, "Reset Sim800 successfully");
+                break;
+            }
+            try++;
+        }while(try < 2);
+        //do
+        //{
+	    //    if(dce_g->power_down(dce_g) == ESP_OK) // Power down the modem (Currently there is no lib implementation of sim800 using AT+CFUN=1,1)
+        //    {
+        //        ESP_LOGI(TAG, "Powered down Sim800 successfully");
+        //        break;
+        //    }
+
+        //    try++;
+        //}while(try < 2);
     }
     vTaskDelay(5000 / portTICK_RATE_MS);
 	esp_restart();

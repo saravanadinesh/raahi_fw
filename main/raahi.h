@@ -13,12 +13,15 @@
 #define MAX_MODBUS_REGISTERS 3
 #define MAX_ADC_CHANNELS 4
 #define MAX_DEVICE_ID_LEN 20
+#define ESP_RESTART_REASON_LEN 30
 #define DATA_JSON_QUEUE_SIZE 10
 #define DATA_JSON_STR_SIZE 250
 #define EVENT_JSON_QUEUE_SIZE 10
 #define EVENT_JSON_STR_SIZE 250
 #define QUERY_JSON_QUEUE_SIZE 5
 #define QUERY_JSON_STR_SIZE 300
+#define MAX_INFO_JSON_ITEMS 15
+#define INFO_JSON_LEN (uint16_t)(MAX_INFO_JSON_ITEMS * (MAX_KEY_LEN + MAX_VALUE_LEN))
 #define MAX_AWS_FAILURE_COUNT (uint8_t)10
 #define MAX_MODEM_FAILURE_COUNT (uint8_t)20
 #define MAX_OTA_FAIL_COUNT (uint8_t) 20
@@ -68,7 +71,12 @@ char raahi_log_str[EVENT_JSON_STR_SIZE];
 	compose_mqtt_event(tag, raahi_log_str);\
 	}while(0)
 
-
+#define CHECK_ERROR_CODE(returned, expected) ({                        \
+            if(returned != expected){                                  \
+                printf("TWDT ERROR\n");                                \
+                abort();                                               \
+            }                                                          \
+})
 
 // Function declarations
 void compose_mqtt_event(const char *TAG, char *msg);
@@ -140,7 +148,12 @@ struct debug_data_struct {
 	struct slave_info_struct slave_info[MAX_MODBUS_SLAVES];
 	bool connected_to_internet;
 	bool connected_to_aws;
+    char reset_reason_str[30];
 };
+
+typedef struct {
+    char esp_restart_reason[ESP_RESTART_REASON_LEN];
+} zombie_info_struct;
 
 struct json_struct {
     char key[MAX_KEY_LEN];

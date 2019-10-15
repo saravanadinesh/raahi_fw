@@ -54,7 +54,7 @@ typedef struct modem_dte modem_dte_t;
 #define MODEM_COMMAND_TIMEOUT_OPERATOR (75000)   /*!< Timeout value for getting operator status */
 #define MODEM_COMMAND_TIMEOUT_MODE_CHANGE (3000) /*!< Timeout value for changing working mode */
 #define MODEM_COMMAND_TIMEOUT_HANG_UP (90000)    /*!< Timeout value for hang up */
-#define MODEM_COMMAND_TIMEOUT_POWEROFF (1000)    /*!< Timeout value for power down */
+#define MODEM_COMMAND_TIMEOUT_POWEROFF (3000)    /*!< Timeout value for power down */
 
 /**
  * @brief Working state of DCE
@@ -91,6 +91,7 @@ struct modem_dce {
     esp_err_t (*set_working_mode)(modem_dce_t *dce, modem_mode_t mode); /*!< Set working mode */
     esp_err_t (*hang_up)(modem_dce_t *dce);                             /*!< Hang up */
     esp_err_t (*power_down)(modem_dce_t *dce);                          /*!< Normal power down */
+    esp_err_t (*reset)(modem_dce_t *dce);
     esp_err_t (*deinit)(modem_dce_t *dce);                              /*!< Deinitialize */
 };
 

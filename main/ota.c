@@ -2,6 +2,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"
 #include "esp_system.h"
 #include "esp_event.h"
 #include "esp_event_loop.h"
@@ -162,6 +163,9 @@ void ota_by_fragments(void *pvParameter)
     uint32_t fragment_crc32 = 0;
     while(1) // Loop until failure counters overflow and monitoring task restarts ESP
     {
+        //Reset watchdog timer for _this_ task 
+        CHECK_ERROR_CODE(esp_task_wdt_reset(), ESP_OK);	
+        
         // Always check if there already have been too many errors before proceeding to next iteration
         if (fragmented_ota_error_counter > MAX_OTA_FAIL_COUNT)
         {
