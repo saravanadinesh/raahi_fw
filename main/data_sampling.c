@@ -29,8 +29,8 @@
 #define MODBUS_RTS   (21)
 #define MODBUS_CTS  UART_PIN_NO_CHANGE
 // GPS receiver related Defines
-#define GPS_TASK_TXD   (19)
-#define GPS_TASK_RXD   (27)
+#define GPS_TASK_TXD   (18)
+#define GPS_TASK_RXD   (19)
 #define GPS_TASK_RTS  UART_PIN_NO_CHANGE
 #define GPS_TASK_CTS  UART_PIN_NO_CHANGE
 

@@ -576,6 +576,10 @@ void aws_iot_task(void *param) {
     queryPacket.isRetained = 0;
 	
 	rc = SUCCESS;
+    /* Modem and HTTP server up */
+	status_led_struct status_led;
+	status_led.colour = GREEN;
+	set_status_LED(status_led);
     while(1) { 
         //Reset watchdog timer for _this_ task 
         CHECK_ERROR_CODE(esp_task_wdt_reset(), ESP_OK);	

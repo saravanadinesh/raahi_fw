@@ -44,11 +44,12 @@
 #include "driver/gpio.h"
 
 // Defines
-#define GPIO_CONFIG_PIN_TX GPIO_NUM_19 // TODO: Move this to sdkconfig
-#define GPIO_CONFIG_PIN_RX GPIO_NUM_18 // TODO: Move this to sdkconfig
-#define GPIO_STATUS_PIN_0 32 // TODO: Move this to sdkconfig
-#define GPIO_STATUS_PIN_1 25 // TODO: Move this to sdkconfig
-#define GPIO_STATUS_PIN_2 26 // TODO: Move this to sdkconfig
+#define GPIO_CONFIG_PIN_TX GPIO_NUM_18 // TODO: Move this to sdkconfig
+#define GPIO_CONFIG_PIN_RX GPIO_NUM_19 // TODO: Move this to sdkconfig
+#define GPIO_STATUS_PIN_0 32 // RGB LED RED 1:OFF 0:ON
+#define GPIO_STATUS_PIN_1 27 // RGB LED GREEN 1: OFF ,0:ON
+#define GPIO_STATUS_PIN_2 26 // RGB LED BLUE 1: OFF, 0: ON
+#define GPIO_STATUS_PIN_3 25 // RED power LED 1:ON , 0:OFF 
 #define POST_BUF_SIZE (uint16_t)512 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
@@ -436,47 +437,54 @@ static void ota_task()
 ------------------------------------------------------------*/
 void init_config_gpio()
 {
-    gpio_config_t config_io_rx, config_io_tx;
+    gpio_config_t gps_io_rx, gps_io_tx;
     gpio_config_t config_io_led_0;
     gpio_config_t config_io_led_1;
     gpio_config_t config_io_led_2;
+    gpio_config_t config_io_led_3;
     //disable interrupt
-    config_io_rx.intr_type = GPIO_PIN_INTR_DISABLE;
-    config_io_tx.intr_type = GPIO_PIN_INTR_DISABLE;
+    gps_io_rx.intr_type = GPIO_PIN_INTR_DISABLE;
+    gps_io_tx.intr_type = GPIO_PIN_INTR_DISABLE;
     config_io_led_0.intr_type = GPIO_PIN_INTR_DISABLE;
     config_io_led_1.intr_type = GPIO_PIN_INTR_DISABLE;
     config_io_led_2.intr_type = GPIO_PIN_INTR_DISABLE;
+    config_io_led_3.intr_type = GPIO_PIN_INTR_DISABLE;
     //set as input mode
-    config_io_rx.mode = GPIO_MODE_INPUT;
+    gps_io_rx.mode = GPIO_MODE_INPUT;
     //set as output mode
-    config_io_tx.mode = GPIO_MODE_OUTPUT;
+    gps_io_tx.mode = GPIO_MODE_OUTPUT;
     config_io_led_0.mode = GPIO_MODE_OUTPUT;
     config_io_led_1.mode = GPIO_MODE_OUTPUT;
     config_io_led_2.mode = GPIO_MODE_OUTPUT;
+    config_io_led_3.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
-    config_io_rx.pin_bit_mask = (1ULL<<GPIO_CONFIG_PIN_RX);
-    config_io_tx.pin_bit_mask = (1ULL<<GPIO_CONFIG_PIN_TX);
+    gps_io_rx.pin_bit_mask = (1ULL<<GPIO_CONFIG_PIN_RX);
+    gps_io_tx.pin_bit_mask = (1ULL<<GPIO_CONFIG_PIN_TX);
     config_io_led_0.pin_bit_mask = (1ULL<<GPIO_STATUS_PIN_0);
     config_io_led_1.pin_bit_mask = (1ULL<<GPIO_STATUS_PIN_1);
     config_io_led_2.pin_bit_mask = (1ULL<<GPIO_STATUS_PIN_2);
+    config_io_led_3.pin_bit_mask = (1ULL<<GPIO_STATUS_PIN_3);
     //enable/disable pull-down mode
-    config_io_rx.pull_down_en = 1;
-    config_io_tx.pull_down_en = 0;
+    //config_io_rx.pull_down_en = 1;
+    //config_io_tx.pull_down_en = 0;
     //disable pull-up mode
-    config_io_rx.pull_up_en = 0;
-    config_io_tx.pull_up_en = 1;
+    //config_io_rx.pull_up_en = 0;
+    //config_io_tx.pull_up_en = 1;
     config_io_led_0.pull_up_en = 1;
     config_io_led_1.pull_up_en = 1;
     config_io_led_2.pull_up_en = 1;
+    config_io_led_3.pull_up_en = 0;
     config_io_led_0.pull_down_en = 0;
     config_io_led_1.pull_down_en = 0;
     config_io_led_2.pull_down_en = 0;
+    config_io_led_3.pull_down_en = 1;
     //configure GPIO with the given settings
-    gpio_config(&config_io_rx);
-    gpio_config(&config_io_tx);
+    gpio_config(&gps_io_rx);
+    gpio_config(&gps_io_tx);
     gpio_config(&config_io_led_0);
     gpio_config(&config_io_led_1);
     gpio_config(&config_io_led_2);
+    gpio_config(&config_io_led_3);
 }
 
 
@@ -558,8 +566,6 @@ void app_main()
 
     init_config_gpio();
 
-    //set tx gpio to 1
-    gpio_set_level(GPIO_CONFIG_PIN_TX,1);
 	// Init WiFi soft AP
 	wifi_init_softap();
 
@@ -588,22 +594,13 @@ void app_main()
         ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
     }
     strcpy(debug_data.fw_ver, running_app_info.version);
-
-	// Check the Config GPIO pin. 
-    if(gpio_get_level(GPIO_CONFIG_PIN_RX) == 1) {
-		ESP_LOGI(TAG, "Config Pin set. Going into OTA mode\n");
-                gpio_set_level(GPIO_STATUS_PIN_0,0);// Set Green LED 
-                gpio_set_level(GPIO_STATUS_PIN_1,1);
-                gpio_set_level(GPIO_STATUS_PIN_2,1);
-		ota_task();
-
-	} else {
-		ESP_LOGI(TAG, "Config Pin set. Going into Normal mode\n");
-                
-                gpio_set_level(GPIO_STATUS_PIN_0,1);
-                gpio_set_level(GPIO_STATUS_PIN_1,0);/* Set Red LED */
-                gpio_set_level(GPIO_STATUS_PIN_2,1);
-		normal_tasks();
-	}
+    /* Set RGB Red LED */
+    gpio_set_level(GPIO_STATUS_PIN_0,0);
+    gpio_set_level(GPIO_STATUS_PIN_1,1);
+    gpio_set_level(GPIO_STATUS_PIN_2,1);
+    
+    /* Set Power LED */
+    gpio_set_level(GPIO_STATUS_PIN_3,1);
+    normal_tasks();
 
 }

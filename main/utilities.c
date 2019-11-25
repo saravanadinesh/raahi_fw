@@ -15,8 +15,8 @@
 #include "freertos/task.h"
 #include "esp_sntp.h"
 
-#define RGB_LED_GREEN_PIN 32 // TODO: Move this to sdkconfig
-#define RGB_LED_RED_PIN 25 // TODO: Move this to sdkconfig
+#define RGB_LED_GREEN_PIN 27 // TODO: Move this to sdkconfig
+#define RGB_LED_RED_PIN 32 // TODO: Move this to sdkconfig
 #define RGB_LED_BLUE_PIN 26 // TODO: Move this to sdkconfig
 
 static const char *TAG = "utilities";
