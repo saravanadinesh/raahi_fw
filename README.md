@@ -1,6 +1,6 @@
 # Amazon Web Services IoT MQTT Subscribe/Publish Example
 
-This is an adaptation of the [AWS IoT C SDK](https://github.com/aws/aws-iot-device-sdk-embedded-C) "subscribe_publish" example for ESP-IDF.
+Sensor gateway firmware. Runs on ESP32. Uses FreeRTOS. Collects multiple sensor data, gps coordinates periodically, sends to AWS. User can also send commands from AWS at any arbitrary time to get sensor data, change logging configuration, debug errors and more. FW has the functionality to let the user update firmware (OTA) from AWS (User can update code on multiple devices in one shot) in a piece-meal fashion over unreliable network.
 
 # Configuration
 
